@@ -2,23 +2,23 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>http://localhost:1313/</loc>
+    <loc>https://blog.flomb.net/</loc>
     <lastmod>2024-08-30T17:24:34+02:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/posts/post-1/</loc>
+    <loc>https://blog.flomb.net/posts/post-1/</loc>
     <lastmod>2024-08-30T17:24:34+02:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/posts/</loc>
+    <loc>https://blog.flomb.net/posts/</loc>
     <lastmod>2024-08-30T17:24:34+02:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/about/</loc>
+    <loc>https://blog.flomb.net/about/</loc>
     <lastmod>2024-08-30T16:51:52+02:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/posts/my-first-post/</loc>
+    <loc>https://blog.flomb.net/posts/my-first-post/</loc>
     <lastmod>2024-08-30T16:42:00+02:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/categories/</loc>
+    <loc>https://blog.flomb.net/categories/</loc>
   </url><url>
-    <loc>http://localhost:1313/tags/</loc>
+    <loc>https://blog.flomb.net/tags/</loc>
   </url>
 </urlset>
