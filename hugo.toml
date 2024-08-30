@@ -1,0 +1,12 @@
+baseURL = 'https://blog.flomb.net'
+languageCode = 'en-us'
+title = 'Flomb Blog'
+theme = 'holy'
+
+[menu]
+
+  [[menu.main]]
+    identifier = "about"
+    name = "About"
+    url = "/about/"
+    weight = 10

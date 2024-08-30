@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Posts on Flomb Blog</title>
+    <link>http://localhost:1313/posts/</link>
+    <description>Recent content in Posts on Flomb Blog</description>
+    <generator>Hugo</generator>
+    <language>en-us</language>
+    <lastBuildDate>Fri, 30 Aug 2024 17:24:34 +0200</lastBuildDate>
+    <atom:link href="http://localhost:1313/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Post 1</title>
+      <link>http://localhost:1313/posts/post-1/</link>
+      <pubDate>Fri, 30 Aug 2024 17:24:34 +0200</pubDate>
+      <guid>http://localhost:1313/posts/post-1/</guid>
+      <description></description>
+    </item>
+    <item>
+      <title>My First Post</title>
+      <link>http://localhost:1313/posts/my-first-post/</link>
+      <pubDate>Fri, 30 Aug 2024 16:42:00 +0200</pubDate>
+      <guid>http://localhost:1313/posts/my-first-post/</guid>
+      <description>Hello World some code:&#xA;import requests try: for i in range(1,20): r = requests.get(f&amp;#34;https://www.google.de/{i}&amp;#34;) print(r.text[:20]) except KeyboardInterrupt: pass </description>
+    </item>
+  </channel>
+</rss>
