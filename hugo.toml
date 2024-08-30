@@ -2,6 +2,7 @@ baseURL = 'https://blog.flomb.net'
 languageCode = 'en-us'
 title = 'Flomb Blog'
 theme = 'holy'
+publishDir = 'docs'
 
 [menu]
 
