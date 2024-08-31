@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+{{- partial "head.html" . -}}
+
+<body class="bg:fade-84@dark font:fade-16@dark font:sans">
+    {{ partial "header.html" . -}}
+    <div class="d:flex flex:column@<=sm pt:90 jc:center gap:44 word-break:break-word">
+        {{- block "side" . }}{{- end }}
+        <div class="max-w:1200 w:full px:10 box:content-box">
+            <style>
+                div.highlight pre {
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-size: large;
+                    }
+            </style>
+            {{- block "main" . }}{{- end }}
+            {{- partial "footer.html" . -}}
+        </div>
+    </div>
+</body>
+
+</html>
