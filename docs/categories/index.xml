@@ -2,10 +2,10 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Categories on Flomb Blog</title>
-    <link>https://blog.flomb.net/categories/</link>
+    <link>blog.flomb.net/categories/</link>
     <description>Recent content in Categories on Flomb Blog</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <atom:link href="https://blog.flomb.net/categories/index.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="blog.flomb.net/categories/index.xml" rel="self" type="application/rss+xml" />
   </channel>
 </rss>

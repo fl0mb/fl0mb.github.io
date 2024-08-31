@@ -1,8 +1,7 @@
 +++
-title = 'My First Post'
-date = 2024-08-30T16:42:00+02:00
+title = 'Post 1'
+date = 2024-08-30T17:24:34+02:00
 +++
-
 
 # Hello World
 
@@ -17,3 +16,6 @@ try:
 except KeyboardInterrupt:
     pass
 ```
+
+
+![test](image.png)

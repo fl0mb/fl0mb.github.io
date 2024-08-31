@@ -1,0 +1,15 @@
++++
+title = 'Auto Tls'
+date = 2024-08-31T15:44:45+02:00
+draft = true
++++
+
+TIL: 
+
+hl_inline=true
+
+```bash {linenos=inline}
+curl -k --resolve <collaborator url>:443:$(dig learning.greensoluce.com +short| tail -1) https://<collaborator url> -H "Host: learning.greensoluce.com"
+```
+
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss

@@ -2,32 +2,32 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>Flomb Blog</title>
-    <link>https://blog.flomb.net/</link>
+    <link>blog.flomb.net/</link>
     <description>Recent content on Flomb Blog</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Fri, 30 Aug 2024 17:24:34 +0200</lastBuildDate>
-    <atom:link href="https://blog.flomb.net/index.xml" rel="self" type="application/rss+xml" />
+    <lastBuildDate>Sat, 31 Aug 2024 15:19:43 +0200</lastBuildDate>
+    <atom:link href="blog.flomb.net/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Databricks Privilege Escalation</title>
+      <link>blog.flomb.net/posts/databricks/</link>
+      <pubDate>Sat, 31 Aug 2024 15:19:43 +0200</pubDate>
+      <guid>blog.flomb.net/posts/databricks/</guid>
+      <description>The following write-ups detail a privilege escalation vulnerability in Databricks that I discovered during my time at a previous employer. Due to contractual obligations, the post only contains links to external resources. For political reasons there are three versions of the same write-up with varying degrees of detail.&#xA;Securing Databricks cluster init scripts Securing Databricks cluster init scripts SEC Consult mirror Bypassing cluster isolation in Databricks Platform </description>
+    </item>
     <item>
       <title>Post 1</title>
-      <link>https://blog.flomb.net/posts/post-1/</link>
+      <link>blog.flomb.net/posts/hello-world/</link>
       <pubDate>Fri, 30 Aug 2024 17:24:34 +0200</pubDate>
-      <guid>https://blog.flomb.net/posts/post-1/</guid>
-      <description></description>
+      <guid>blog.flomb.net/posts/hello-world/</guid>
+      <description>Hello World some code:&#xA;import requests try: for i in range(1,20): r = requests.get(f&amp;#34;https://www.google.de/{i}&amp;#34;) print(r.text[:20]) except KeyboardInterrupt: pass </description>
     </item>
     <item>
       <title>About</title>
-      <link>https://blog.flomb.net/about/</link>
+      <link>blog.flomb.net/about/</link>
       <pubDate>Fri, 30 Aug 2024 16:51:52 +0200</pubDate>
-      <guid>https://blog.flomb.net/about/</guid>
-      <description>Simple security orient blog.</description>
-    </item>
-    <item>
-      <title>My First Post</title>
-      <link>https://blog.flomb.net/posts/my-first-post/</link>
-      <pubDate>Fri, 30 Aug 2024 16:42:00 +0200</pubDate>
-      <guid>https://blog.flomb.net/posts/my-first-post/</guid>
-      <description>Hello World some code:&#xA;import requests try: for i in range(1,20): r = requests.get(f&amp;#34;https://www.google.de/{i}&amp;#34;) print(r.text[:20]) except KeyboardInterrupt: pass </description>
+      <guid>blog.flomb.net/about/</guid>
+      <description>Simple, mostly security oriented, personal blog.</description>
     </item>
   </channel>
 </rss>
