@@ -1,7 +1,6 @@
 +++
-title = 'Auto Tls'
+title = 'Auto TLS'
 date = 2024-08-31T15:44:45+02:00
-draft = true
 +++
 
 TIL: 
@@ -13,3 +12,4 @@ curl -k --resolve <collaborator url>:443:$(dig learning.greensoluce.com +short| 
 ```
 
 ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss
+

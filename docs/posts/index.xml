@@ -6,8 +6,15 @@
     <description>Recent content in Posts on Flomb Blog</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 31 Aug 2024 15:19:43 +0200</lastBuildDate>
+    <lastBuildDate>Sat, 31 Aug 2024 15:44:45 +0200</lastBuildDate>
     <atom:link href="blog.flomb.net/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Auto TLS</title>
+      <link>blog.flomb.net/posts/auto-tls/</link>
+      <pubDate>Sat, 31 Aug 2024 15:44:45 +0200</pubDate>
+      <guid>blog.flomb.net/posts/auto-tls/</guid>
+      <description>TIL:&#xA;hl_inline=true&#xA;1curl -k --resolve &amp;lt;collaborator url&amp;gt;:443:$(dig learning.greensoluce.com +short| tail -1) https://&amp;lt;collaborator url&amp;gt; -H &amp;#34;Host: learning.greensoluce.com&amp;#34; ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss</description>
+    </item>
     <item>
       <title>Databricks Privilege Escalation</title>
       <link>blog.flomb.net/posts/databricks/</link>
