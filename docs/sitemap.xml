@@ -2,20 +2,17 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>https://blog.flomb.net/posts/auto-tls/</loc>
-    <lastmod>2024-08-31T15:44:45+02:00</lastmod>
-  </url><url>
     <loc>https://blog.flomb.net/</loc>
-    <lastmod>2024-08-31T15:44:45+02:00</lastmod>
+    <lastmod>2024-09-03T13:01:44+02:00</lastmod>
   </url><url>
     <loc>https://blog.flomb.net/posts/</loc>
+    <lastmod>2024-09-03T13:01:44+02:00</lastmod>
+  </url><url>
+    <loc>https://blog.flomb.net/posts/autotls/</loc>
     <lastmod>2024-08-31T15:44:45+02:00</lastmod>
   </url><url>
     <loc>https://blog.flomb.net/posts/databricks/</loc>
     <lastmod>2024-08-31T15:19:43+02:00</lastmod>
-  </url><url>
-    <loc>https://blog.flomb.net/posts/hello-world/</loc>
-    <lastmod>2024-08-30T17:24:34+02:00</lastmod>
   </url><url>
     <loc>https://blog.flomb.net/about/</loc>
     <lastmod>2024-08-30T16:51:52+02:00</lastmod>
