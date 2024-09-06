@@ -86,8 +86,6 @@ After I got a few matches, I tried to replicate them to see if there were any ac
 ```bash {linenos=inline}
 curl -k --resolve <collaborator url>:443:$(dig learning.greensoluce.com +short| tail -1) https://<collaborator url> 
 ```
-(The given example was actually a SaaS vendor which allowed configuring a custom domain)
-
 The results were quite surprising:
 
 ![](bb_example1.png)
@@ -96,7 +94,19 @@ The results were quite surprising:
 
 These responses hint at automatic TLS certificate issuance, with the second one clearly using the [ACME HTTP Challenge](https://datatracker.ietf.org/doc/html/rfc8555#section-8.3). Therefore, instead of SNI-based SSRF, I found servers that automatically requested a certificate for the requested SNI. 
 
-A quick search led me to the [caddy web server](https://caddyserver.com/), which [claims](https://caddyserver.com/docs/automatic-https#on-demand-tls) to be the first to offer this functionality. As this was entirely new to me, I wanted to try it out. All you would have to do is download caddy and start it with the following configuration:
+*(The above example however was actually related to a SaaS vendor which allowed configuring a custom domain instead of `instance-id.vendor.com`)*
+
+A quick search led me to the [caddy web server](https://caddyserver.com/), which [claims](https://caddyserver.com/docs/automatic-https#on-demand-tls) to be the first to offer this functionality. As this was entirely new to me, I wanted to try it out. All you would have to do is download caddy and start it with the following configuration.
+```bash
+caddy run --config caddyfile 
+```
+
+**Disclaimer: use this configuration only for testing purposes!**  
+The [ACME protocol](https://datatracker.ietf.org/doc/html/rfc8555) ensures that you can not request certificates for domains you do not own, additionally, services like [Let's Encrypt](https://letsencrypt.org/) are rate-limited and you might therefore not be able to request a legitimate certificate after too many false attempts. For that reason Caddy requires you to configure restrictions when using `on_demand_tls`. This is implemented via the `ask` option, which is an endpoint to which Caddy will send an HTTP request to confirm the domain before attempting to issue a certificate.
+
+In this example we configured Caddy itself to confirm these requests which would lead to the kind of behavior initially observed.
+
+
 
 ```caddy
 {
@@ -115,9 +125,4 @@ http://localhost:5555 {
     }
     respond "Welcome to Caddy!"
 }
-```
-**Disclaimer: The `ask` setting is required to prevent abuse, use this configuration only for testing purposes!**
-
-```bash
-caddy run --config caddyfile 
 ```
