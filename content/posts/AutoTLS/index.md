@@ -81,11 +81,12 @@ http:
           - "http"
 ```
 
-After I got a few matches, I tried to replicate them to see if there were any actual vulnerabilities:
+After I got a few matches, I tried to replicate them to see if there were any actual vulnerabilities. The `Host` header is included because some reverse proxies will reject a request if SNI and HTTP Host header do not match. The `dig` command substitution was necessary to avoid things like CNAME records where we only want the final IP address.
 
 ```bash {linenos=inline}
-curl -k --resolve <collaborator url>:443:$(dig learning.greensoluce.com +short| tail -1) https://<collaborator url> 
+curl -k --resolve <collaborator url>:443:$(dig learning.greensoluce.com +short| tail -1) https://<collaborator url> -H "Host: learning.greensoluce.com"
 ```
+
 The results were quite surprising:
 
 ![](bb_example1.png)
@@ -104,7 +105,7 @@ caddy run --config caddyfile
 **Disclaimer: use this configuration only for testing purposes!**  
 The [ACME protocol](https://datatracker.ietf.org/doc/html/rfc8555) ensures that you can not request certificates for domains you do not own, additionally, services like [Let's Encrypt](https://letsencrypt.org/) are rate-limited and you might therefore not be able to request a legitimate certificate after too many false attempts. For that reason Caddy requires you to configure restrictions when using `on_demand_tls`. This is implemented via the `ask` option, which is an endpoint to which Caddy will send an HTTP request to confirm the domain before attempting to issue a certificate.
 
-In this example we configured Caddy itself to confirm these requests which would lead to the kind of behavior initially observed.
+In this example we configured Caddy itself to confirm these requests, which would lead to the kind of behavior initially observed.
 
 
 
@@ -115,14 +116,16 @@ In this example we configured Caddy itself to confirm these requests which would
     }
 }
 
-http://localhost:5555 {
-        respond 200
-}
-
+# main listener configured with tls on demand
 :443 {
     tls {
         on_demand
     }
     respond "Welcome to Caddy!"
+}
+
+# listener confirming requests for certificate generation
+http://localhost:5555 {
+        respond 200
 }
 ```
