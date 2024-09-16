@@ -190,7 +190,102 @@ Or use credentials obtained in another way, for example service account tokens r
 
 ### RCE
 
-Initially, when I visited the root url
+Initially, when I visited the root url I noticed the following import function:
+![](import1.png)  
+![](import2.png)  
+  
+If we click through and fill in some dummy data we can generate the following request:
+
+```http
+POST /apis/tekton.dev/v1/namespaces/tekton-dashboard/pipelineruns/ HTTP/1.1
+Host: 127.0.0.1:9097
+Content-Type: application/json
+Tekton-Client: tektoncd/dashboard
+...
+```
+
+This request create a pipelinerun resource so lets find out what that means.
+
+Because the path starts with `/apis/` we know we are dealing with a [named api group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` ist not a built-in group we are dealing with either an ggregated api server or, more commonly a custom resource definition (CRD). We can find the CRD in the pipelines repo:
+
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pipelineruns.tekton.dev
+  labels:
+    app.kubernetes.io/instance: default
+    app.kubernetes.io/part-of: tekton-pipelines
+    pipeline.tekton.dev/release: "devel"
+    version: "devel"
+spec:
+  group: tekton.dev
+  preserveUnknownFields: false
+  versions:
+  - name: v1beta1
+    served: true
+    storage: false
+    schema:
+      openAPIV3Schema:
+        type: object
+...
+```
+The schema is however not that expressive as it only expects a json object. We did find a document describing the relation at `docs/developers/controller-logic.md`
+
+`pkg/apis/pipeline/v1/pipelinerun_types.go`
+`pkg/apis/pipeline/v1/taskrun_types.go`
+
+matching reconcilers to create anything:
+`pkg/reconciler/pipelinerun/pipelinerun.go`
+
+`pkg/reconciler/taskrun/taskrun.go#createPod()` is where the pod is created
+
+**play arround with that at home, run taskrun alone, also have log access to the controller any maybe show that**
+
+----- 
+welche rechte nochmal? kann ich auch direkt einen taskrun anlegen und kein pipelinerun?
+```
+    resources:
+      - stepactions
+      - tasks
+      - taskruns
+      - pipelines
+      - pipelineruns
+      - customruns
+    verbs:
+      - create
+      - update
+      - delete
+      - patch
+```
+pipelinerun generates a taskrun
+
+Tekton is built using knative https://knative.dev/docs/
+
+the CRD itself does not do anything, it needs a controller that changes te clusters state. That process is called "reconciling". Therefore i am looking for implementations of a reconlicer 
+
+wording: "configure the aggregation layer, add an extension api server running in a pod"
+
+can i add api aggregation without restarting the cluster, without adding a cli flag?
+
+Not possible to destinguish CRDs from api aggregation solely by looking at the path. They look the same 
+
+default named groups: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#api-groups
+
+Api server design docs: https://github.com/kubernetes/design-proposals-archive/blob/main/api-machinery/api-group.md
+
+There are 2 kinds of paths:
+core group  `/api/v1/`
+named groups `/apis/` `/apis/$GROUP_NAME/$VERSION`
+https://kubernetes.io/docs/reference/using-api/#api-groups
+
+aggregated discovery ist mir neu: https://kubernetes.io/docs/concepts/overview/kubernetes-api/
+zeigt alle ressourcen auf einmal statt nur an den einzelnen endpunkten dann wie /apis/tekton.dev/ -> versions
+Geht nur über den header:
+`Accept: application/json;v=v2;g=apidiscovery.k8s.io;as=APIGroupDiscoveryList`
+Damit mal scannen, außerdem mit dem protobuf header scannen, evtl lassen sich dadurch kubelets finden die das normale nuclei template nicht findet. Vlt gibt es da auch lücken im routing und oder firewalls
+
+
 
 Interestingly this only works in the `tekton-dashboard` namespace. Both `tekton-pipelines` and `tekton-pipelines-resolvers` have [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
 
@@ -420,7 +515,7 @@ Connection: close
 ```
 
 yaml version
-```
+```yaml
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
