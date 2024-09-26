@@ -57,7 +57,7 @@ Unfortunately, accessing the reported endpoint at `/pods` returned a 404 error, 
 } 
 ```
 
-This response strongly resembles a Kubernetes API reply and, more importantly, it appears to be authenticated with the `system:serviceaccount:tekton-pipelines:tekton-dashboard` user.
+This response strongly resembles a Kubernetes API reply and, more importantly, it appears to be authenticated as the `system:serviceaccount:tekton-pipelines:tekton-dashboard` user. Apparently we are dealing with some pre-authenticated proxying behavior.
 
 ## Proxying with Tekton
 
@@ -69,13 +69,13 @@ Rather than immediately reconsidering the attack surface, I decided to investiga
 
 `kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml`
 
-This file contains a definition of a `tekton-dashboard` service account and its role bindings. While I didn't review the roles exhaustively, I quickly noticed read access to `pods` and `pods/logs`. This presented a potential quick win because `pods/logs` implies access to container stdout and pod definitions contain environment variables, both of which could contain sensitive information.
+This file contains a definition of a `tekton-dashboard` service account and its role bindings. While I didn't review the roles exhaustively, I quickly noticed read access to `pods` and `pods/logs`. This presented a potential quick win because it meant access to container stdout and pod definitions, both of which could contain sensitive information.
 
-Leveraging the pre-authenticated proxying behavior of Tekton, it's possible to view individual containers using:
+Using the pre-authenticated proxying behavior it is indeed possible to view individual containers using:
 
 ![](env.png)
 
-This example contained a hard-coded secret value, obviously not recommended but nonetheless it happens. The [mysql image](https://hub.docker.com/_/mysql) used in this scenario could also be started with the `MYSQL_RANDOM_ROOT_PASSWORD` environment variable set. This generates a random password and prints it to stdout where we could still access it:
+This artificial example contained a hard-coded secret value, obviously not recommended but nonetheless it happens. The same [mysql image](https://hub.docker.com/_/mysql) used in this scenario could also be started with the `MYSQL_RANDOM_ROOT_PASSWORD` environment variable set. This generates a random password and prints it to stdout, where it is still publicy accessible:
 
 ```
 └─$ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log 
@@ -89,7 +89,7 @@ This example contained a hard-coded secret value, obviously not recommended but 
 At this point, I had gained access to several credentials and informed the client accordingly.
 
 
-To see what else we can do with that endpoint lets take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go´s](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account:
+To see what else we can do with that endpoint lets take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go´s](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
 ```go
 func main() {
 ...
@@ -154,7 +154,9 @@ func NewProxyHandler(cfg *rest.Config, keepalive time.Duration) (http.Handler, e
 	return proxyServer, nil
 }
 ```
-A noticeable change is the addition of `protectWebSocket(proxy)`, this is a protection against cross-origin websocket hijacking, which is irrelevant as we are not constrained by a browser. Lastly, in [`ServeOnListener()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183) a CSRF protection is added:
+A noticeable change is the addition of `protectWebSocket(proxy)`, this is a protection against cross-origin websocket hijacking, which is irrelevant as we are not constrained by a browser and therefore able to set arbitrary values for the `origin` header. 
+
+Lastly, the [`ServeOnListener()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183) function is called on the `http.server` returned by `Register()` which appears to add a CSRF protection:
 
 ```go
 func (s *Server) ServeOnListener(l net.Listener) error {
@@ -167,7 +169,7 @@ func (s *Server) ServeOnListener(l net.Listener) error {
 	return server.Serve(l)
 }
 ```
-For http methods deemed unsafe it expects a hard-coded header with the name `Tekton-Client`.
+By applying `CSRF()` to the original `http.Handler`, a new `csrf` struct ist returned which basically wrapps `ServeHTTP()`. This will in turn be called by `server.Serve(l)`. Then, for http methods deemed unsafe, a hard-coded header with the name `Tekton-Client` is excpected.
 ```go
 func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := safeMethods[r.Method]; !ok {
@@ -177,7 +179,11 @@ func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	cs.h.ServeHTTP(w, r)
+}
 ```
+add more / something unconstrained etc / mention that adding your own credentials works too
 
 To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again.
 
@@ -243,6 +249,11 @@ matching reconcilers to create anything:
 **play arround with that at home, run taskrun alone, also have log access to the controller any maybe show that**
 
 ----- 
+Ablauf ist etwas unlogisch oben, muss den ganzen code flow zeigen
+parseOptions creates `csrf` struct which has the new ServeHTTP()
+
+makeUpgradeTransport gleich wie bei kubernetes?
+
 welche rechte nochmal? kann ich auch direkt einen taskrun anlegen und kein pipelinerun?
 ```
     resources:
