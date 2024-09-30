@@ -84,7 +84,6 @@ $ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log
 2024-09-07 12:10:11+00:00 [Note] [Entrypoint]: Temporary server started.
 '/var/lib/mysql/mysql.sock' -> '/var/run/mysqld/mysqld.sock'
 2024-09-07 12:10:13+00:00 [Note] [Entrypoint]: GENERATED ROOT PASSWORD: dJZurxd0BGJIPcYPUphZ3QcnWd9IbdxG
-...
 ```
 
 At this point, I had gained access to several credentials and informed the client accordingly.
@@ -189,10 +188,12 @@ The value of said header does apparently not matter. To be sure we can just set 
 
 **To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally we can either bring our "own" credentials or act with whatever privileges the `tekton-dashboard` service account has.**
 
-For convenience I [patched](https://github.com/fl0mb/kubernetes) kubectl to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:
+For convenience I [patched](https://github.com/fl0mb/kubernetes) kubectl to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:  
+  
 ![](whoami.png)
 
-Or use credentials obtained in another way, for example, service account tokens read via a file inclusion vulnerability in a web application:
+Or use credentials obtained in another way, for example, service account tokens read via a file inclusion vulnerability in a web application:  
+  
 ![](shell.png)
 
 ### RCE
@@ -359,8 +360,9 @@ spec:
 ```
 
 And indeed it was possible to access the nodes file system, which is usually enough to compromise the whole cluster:
-![](rce.png)
-
+  
+![](rce.png)  
+  
 Interestingly this is only possible in the `tekton-dashboard` namespace (and every other non-secured namespace). Both the `tekton-pipelines` and the `tekton-pipelines-resolvers` namespaces have the [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
 
 ![](podsecurity.png)
@@ -375,8 +377,8 @@ A internet exposed Tekton dashboard allows direct access to the Kubernetes API. 
 - Configure pod security standards for the whole cluster.
 
 ### Vendor Reaction
-The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation,because the tutorial did not mention the different modes and installation defaulted to the `read/write` mode.
+The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation, because the tutorial did not mention the different modes and the installation defaulted to `read/write`.
 
-A Github security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to best practices. 
+A Github security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to current cluster administration best practices. 
 
-There are not additional warnings or changes for the central [pipelines repo](https://github.com/tektoncd/pipeline).
+There are no additional warnings or changes for the central [pipelines repo](https://github.com/tektoncd/pipeline).
