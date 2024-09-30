@@ -9,7 +9,7 @@ This is the story of how I found two vulnerabilities in the [Tekton CI/CD Dashbo
 Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now `read-only` instead of `read/write`.
 
 
-It started when I stumbled upon an unusual finding during an assessment. [Nuclei](https://docs.projectdiscovery.io/introduction) reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
+It started when I stumbled upon an unusual finding during an assessment. The scanning of our internal attack surface management solution reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
 
 ### Kubelet
 The [kubelet](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/) is a binary running on every node thats part of a Kubernetes cluster. It interacts with the container runtime to create the actual containers. These are either based on pods requested by the Kubernetes API or the control plane components themselves, implemented as [static containers](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/). 
@@ -123,7 +123,7 @@ func Register(r endpoints.Resource, cfg *rest.Config) (*Server, error) {
 	mux.Handle(apisProxyPrefix, proxyHandler)
 ```
 
-The `proxyHandler` is created via `NewProxyHandler()`. This looks familiar, as it is almost identical to the [code](https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195) used by kubectl itself when proxying connections to the Kubernetes API (`kubectl proxy`).
+The `proxyHandler` is created via `NewProxyHandler()`. This looks familiar, as it is almost identical to the [code](https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195) used by `kubectl` itself when proxying connections to the Kubernetes API (`kubectl proxy`).
 ```go
 func NewProxyHandler(cfg *rest.Config, keepalive time.Duration) (http.Handler, error) {
 	host := cfg.Host
@@ -188,7 +188,7 @@ The value of said header does apparently not matter. To be sure we can just set 
 
 **To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally we can either bring our "own" credentials or act with whatever privileges the `tekton-dashboard` service account has.**
 
-For convenience I [patched](https://github.com/fl0mb/kubernetes) kubectl to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:  
+For convenience I [patched](https://github.com/fl0mb/kubernetes) `kubectl` to add the `Tekton-Client` header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the `tekton-dashboard` service account:  
   
 ![](whoami.png)
 
@@ -216,7 +216,7 @@ Tekton-Client: tektoncd/dashboard
 
 Judging by its request line, this request likely creates a PipelineRun resource so let's explore what that could mean.
 
-Because the path starts with `/apis/` we know we are dealing with a [named API group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` ist not a built-in group we are dealing with either an [aggregated API server](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/apiserver-aggregation/) or, more commonly a [custom resource definition (CRD)](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/). We can find the CRD in the [pipeline repo](https://github.com/tektoncd/pipeline/blob/main/config/300-crds/300-pipelinerun.yaml):
+Because the path starts with `/apis/` we know we are dealing with a [named API group](https://kubernetes.io/docs/reference/using-api/#api-groups). As `tekton.dev` is not a built-in group we are dealing with either an [aggregated API server](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/apiserver-aggregation/) or, more commonly a [custom resource definition (CRD)](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/). We can find the CRD in the [pipeline repo](https://github.com/tektoncd/pipeline/blob/main/config/300-crds/300-pipelinerun.yaml):
 
 ```yaml
 apiVersion: apiextensions.k8s.io/v1
