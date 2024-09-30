@@ -4,10 +4,9 @@ date = 2024-09-03T13:01:44+02:00
 draft = true
 +++
 
-This is the story of how I found two vulnerabilities in the [Tekton Dashboard](https://github.com/tektoncd/dashboard) that allow remote code execution and a potential node takeover if deployed in `read/write` mode as well as pre-authenticated access to the Kubernetes API server in all modes.
+This is the story of how I found two vulnerabilities in the [Tekton CI/CD Dashboard component](https://github.com/tektoncd/dashboard) that allow remote code execution and a potential node takeover if deployed in `read/write` mode as well as pre-authenticated access to the Kubernetes API server in all modes.
 
 Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now `read-only` instead of `read/write`.
-
 
 
 It started when I stumbled upon an unusual finding during an assessment. [Nuclei](https://docs.projectdiscovery.io/introduction) reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn't been observed in our client's scope before, prompting me to investigate further.
@@ -63,7 +62,7 @@ This response strongly resembles a Kubernetes API reply and, more importantly, i
 
 ## Proxying with Tekton
 
-As indicated by the name of the service account, we were dealing with [Tekton](https://tekton.dev/):
+As indicated by the name of the service account, we were dealing with [Tekton](https://tekton.dev/) and its dashboard component:
 
 > Tekton is a powerful and flexible open-source framework for creating CI/CD systems, allowing developers to build, test, and deploy across cloud providers and on-premise systems.
 
@@ -366,11 +365,8 @@ Interestingly this is only possible in the `tekton-dashboard` namespace (and eve
 
 ![](podsecurity.png)
 
-### Timeline / How did tekton react? / Communication with Vendor
-- works as intended
-- update the documentation about the two different modes
-- Github advisory assigned as low
-No changes for tekton pipelines in general?
+### Summary
+A internet exposed Tekton dashboard allows direct access to the Kubernetes API. This access is pre-authenticated with the privileges of the `tekton-dashboard` service account which, regardless of the deployment mode, allows access to pod definitions and container stdout by default. It is also possible to provide your own credentials for the Kubernetes API and if the dashboard is deployed in `read/write` mode it enables remote code execution.
 
 ### Recommendation
 - Do not expose your dashboard to the internet. If needed require prior authentication as described [here](https://github.com/tektoncd/dashboard/blob/main/docs/install.md#access-control).
@@ -378,5 +374,9 @@ No changes for tekton pipelines in general?
 - Limit the privileges of the `tekton-dashboard` service account.
 - Configure pod security standards for the whole cluster.
 
-### Conclusion
-do i need a summary?
+### Timeline / How did tekton react? / Communication with Vendor
+The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation,because the tutorial did not mention the different modes and installation defaulted to the `read/write` mode.
+
+A Github security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to best practices. 
+
+There are not additional warnings or changes for the central [pipelines repo](https://github.com/tektoncd/pipeline).
