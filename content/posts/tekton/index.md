@@ -60,7 +60,7 @@ Unfortunately, accessing the reported endpoint at `/pods` returned a 404 error, 
 
 This response strongly resembles a Kubernetes API reply and, more importantly, it appears to be authenticated as the `system:serviceaccount:tekton-pipelines:tekton-dashboard` user. Apparently we are dealing with some pre-authenticated proxying behavior.
 
-## Proxying with Tekton
+### Proxying with Tekton
 
 As indicated by the name of the service account, we were dealing with [Tekton](https://tekton.dev/) and its dashboard component:
 
@@ -72,7 +72,7 @@ Rather than immediately reconsidering the attack surface, I decided to investiga
 
 This file contains a definition of a `tekton-dashboard` service account and its role bindings. While I didn't review the roles exhaustively, I quickly noticed read access to `pods` and `pods/logs`. This presented a potential quick win because it meant access to container stdout and pod definitions, both of which could contain sensitive information.
 
-Using the pre-authenticated proxying behavior it is indeed possible to view individual containers using:
+Using the pre-authenticated proxying behavior it is indeed possible to view pod definitions using:
 
 ![](env.png)
 
