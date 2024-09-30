@@ -1,5 +1,5 @@
 +++
-title = 'Tekton'
+title = 'Tekton Dashboard RCE and Kubernetes API Proxy'
 date = 2024-09-03T13:01:44+02:00
 draft = true
 +++
@@ -374,7 +374,7 @@ A internet exposed Tekton dashboard allows direct access to the Kubernetes API. 
 - Limit the privileges of the `tekton-dashboard` service account.
 - Configure pod security standards for the whole cluster.
 
-### Timeline / How did tekton react? / Communication with Vendor
+### Vendor Reaction
 The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation,because the tutorial did not mention the different modes and installation defaulted to the `read/write` mode.
 
 A Github security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to best practices. 
