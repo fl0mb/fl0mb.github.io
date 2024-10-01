@@ -6,8 +6,15 @@
     <description>Recent content in Posts on Flomb Blog</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 31 Aug 2024 15:44:45 +0200</lastBuildDate>
+    <lastBuildDate>Tue, 03 Sep 2024 13:01:44 +0200</lastBuildDate>
     <atom:link href="https://blog.flomb.net/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Tekton Dashboard RCE and Kubernetes API Proxy</title>
+      <link>https://blog.flomb.net/posts/tekton/</link>
+      <pubDate>Tue, 03 Sep 2024 13:01:44 +0200</pubDate>
+      <guid>https://blog.flomb.net/posts/tekton/</guid>
+      <description>This is the story of how I found two vulnerabilities in the Tekton CI/CD Dashboard component that allow remote code execution and a potential node takeover if deployed in read/write mode as well as pre-authenticated access to the Kubernetes API server in all modes.&#xA;Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now read-only instead of read/write.&#xA;It started when I stumbled upon an unusual finding during an assessment.</description>
+    </item>
     <item>
       <title>TIL: SNI-Based Auto Certificate Generation Is a Thing</title>
       <link>https://blog.flomb.net/posts/autotls/</link>

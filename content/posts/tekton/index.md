@@ -1,7 +1,6 @@
 +++
 title = 'Tekton Dashboard RCE and Kubernetes API Proxy'
 date = 2024-09-03T13:01:44+02:00
-draft = true
 +++
 
 This is the story of how I found two vulnerabilities in the [Tekton CI/CD Dashboard component](https://github.com/tektoncd/dashboard) that allow remote code execution and a potential node takeover if deployed in `read/write` mode as well as pre-authenticated access to the Kubernetes API server in all modes.
@@ -41,7 +40,9 @@ By default, the kubelet starts with the `--anonymous-auth` parameter set to `tru
 
 Unfortunately, accessing the reported endpoint at `/pods` returned a 404 error, indicating that it was not a kubelet. It could still be a Kubernetes API server, but that would require authentication. A quick test revealed the following:
 
-`curl http://tekton-dashboard:9097/api/v1/secrets`:
+```bash
+curl http://tekton-dashboard:9097/api/v1/secrets
+```
 
 ```json
 {
@@ -68,7 +69,9 @@ As indicated by the name of the service account, we were dealing with [Tekton](h
 
 Rather than immediately reconsidering the attack surface, I decided to investigate the unusual proxying behavior further. I checked the [documentation](https://tekton.dev/docs/dashboard/install/#installing-tekton-dashboard-on-kubernetes) and found that the installation is just a Kubernetes configuration YAML file:
 
-`kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml`
+```
+kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
+```
 
 This file contains a definition of a `tekton-dashboard` service account and its role bindings. While I didn't review the roles exhaustively, I quickly noticed read access to `pods` and `pods/logs`. This presented a potential quick win because it meant access to container stdout and pod definitions, both of which could contain sensitive information.
 
@@ -89,7 +92,7 @@ $ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log
 At this point, I had gained access to several credentials and informed the client accordingly.
 
 
-To see what else we can do with that endpoint let's take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go). Initially, [client-go's](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
+To see what else we can do with that endpoint let's take a look at the [source code](https://github.com/tektoncd/dashboard/blob/main/cmd/dashboard/main.go#L43). Initially, [client-go's](https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme) `InClusterConfig()` is used to get a `config` containing the authentication details of the service account.
 ```go
 func main() {
 ...
@@ -123,7 +126,7 @@ func Register(r endpoints.Resource, cfg *rest.Config) (*Server, error) {
 	mux.Handle(apisProxyPrefix, proxyHandler)
 ```
 
-The `proxyHandler` is created via `NewProxyHandler()`. This looks familiar, as it is almost identical to the [code](https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195) used by `kubectl` itself when proxying connections to the Kubernetes API (`kubectl proxy`).
+The `proxyHandler` is created via [`NewProxyHandler()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L148). This looks familiar, as it is almost identical to the [code](https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195) used by `kubectl` itself when proxying connections to the Kubernetes API (`kubectl proxy`).
 ```go
 func NewProxyHandler(cfg *rest.Config, keepalive time.Duration) (http.Handler, error) {
 	host := cfg.Host
@@ -156,7 +159,14 @@ func NewProxyHandler(cfg *rest.Config, keepalive time.Duration) (http.Handler, e
 ```
 A noticeable change is the addition of `protectWebSocket(proxy)`, this is a protection against cross-origin websocket hijacking, which is irrelevant as we are not constrained by a browser and therefore able to set arbitrary values for the `origin` header. 
 
-Lastly, the [`ServeOnListener()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183) function is called on the `router.Server` returned by `Register()` which appears to add a CSRF protection:
+Additionally, `kubectl's` [`NewProxyHandler()`](https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195) contained the following part that could filter requests based on their host, path or HTTP method. It is however missing for the Tekton Dashboard.
+```go
+if filter != nil {
+	proxyServer = filter.HandlerFor(proxyServer)
+}
+```
+
+Next, the [`ServeOnListener()`](https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183) function is called on the `router.Server` returned by `Register()` which appears to add a CSRF protection:
 
 ```go
 func (s *Server) ServeOnListener(l net.Listener) error {
@@ -284,7 +294,7 @@ type PipelineRunSpec struct {
 ```
 A [controller](https://kubernetes.io/docs/concepts/architecture/controller/) in Kubernetes monitors resources it is interested in and it "reconciles" in response to relevant events. That means it changes the clusters state to match the desired state. In this example that could mean creating a specific pod whenever a new PipelineRun is requested. Another controller, the kube-scheduler, notices the requirement of a new pod and goes on to schedule it to a node.
 
-Therefore, to understand the PipelineRun resource we have to check its reconciler implementation at `pkg/reconciler/pipelinerun/pipelinerun.go`.
+Therefore, to understand the PipelineRun resource, we have to check its reconciler implementation at `pkg/reconciler/pipelinerun/pipelinerun.go`.
 
 Before diving into the code I wanted to take a break and play around with the functionality first. While doing so I noticed the "Edit and run" button of my existing PipelineRun. It presented a nicely readable and editable YAML file containing the definition of my PipelineRun resource:
 
@@ -363,7 +373,7 @@ And indeed it was possible to access the nodes file system, which is usually eno
   
 ![](rce.png)  
   
-Interestingly this is only possible in the `tekton-dashboard` namespace (and every other non-secured namespace). Both the `tekton-pipelines` and the `tekton-pipelines-resolvers` namespaces have the [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
+Interestingly, this is only possible in the `tekton-dashboard` namespace (and every other non-secured namespace). Both the `tekton-pipelines` and the `tekton-pipelines-resolvers` namespaces have the [pod security standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/) profile `Restricted` applied:
 
 ![](podsecurity.png)
 

