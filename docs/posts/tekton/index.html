@@ -3,6 +3,14 @@
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Tekton Dashboard RCE and Kubernetes API Proxy">
+  <meta name="twitter:description" content="This is the story of how I found two vulnerabilities in the Tekton CI/CD Dashboard component that allow remote code execution and a potential node takeover if deployed in read/write mode as well as pre-authenticated access to the Kubernetes API server in all modes.
+Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now read-only instead of read/write.
+It started when I stumbled upon an unusual finding during an assessment.">
+
+    <link rel="alternate" type="application/rss+xml" href="https://blog.flomb.net//index.xml" title="Flomb Blog">
 
     <title>Tekton Dashboard RCE and Kubernetes API Proxy - Flomb Blog</title>
 
