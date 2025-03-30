@@ -389,6 +389,6 @@ A internet exposed Tekton dashboard allows direct access to the Kubernetes API. 
 ### Vendor Reaction
 The issue was communicated to the Tekton security team in July 2024. They came to the conclusion that the issue lies primarily in the documentation, because the tutorial did not mention the different modes and the installation defaulted to `read/write`.
 
-A GitHub security advisory was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to current cluster administration best practices. 
+A [GitHub security advisory](https://github.com/tektoncd/dashboard/security/advisories/GHSA-mp78-wp68-vxpq) was opened, the documentation improved and the default mode was changed to `read-only`. Other than that they referred to current cluster administration best practices. 
 
 There are no additional warnings or changes for the central [pipelines repo](https://github.com/tektoncd/pipeline).
