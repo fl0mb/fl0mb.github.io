@@ -6,8 +6,15 @@
     <description>Recent content in Posts on Flomb Blog</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Tue, 03 Sep 2024 13:01:44 +0200</lastBuildDate>
+    <lastBuildDate>Mon, 31 Mar 2025 10:38:29 +0200</lastBuildDate>
     <atom:link href="https://blog.flomb.net/posts/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Exploiting IngressNightmare: A Deep Dive</title>
+      <link>https://blog.flomb.net/posts/ingressnightmare/</link>
+      <pubDate>Mon, 31 Mar 2025 10:38:29 +0200</pubDate>
+      <guid>https://blog.flomb.net/posts/ingressnightmare/</guid>
+      <description>Wiz recently discovered an unauthenticated remote code execution (RCE) vulnerability in the Ingress NGINX admission controller. I found the exploit chain particularly intriguing and decided to recreate it for a deeper understanding.&#xA;I want to thank my employer CODE WHITE for the permission to publish this post. As part of our Security Intelligence Service, we identified, exploited, and quickly remediated this vulnerability on systems within our clients&amp;rsquo; scope.&#xA;Introduction to Kubernetes Ingress and Admission Controllers In Kubernetes, an Ingress resource is used to manage external access to services within a cluster, typically by routing HTTP/HTTPS traffic based on defined rules.</description>
+    </item>
     <item>
       <title>Tekton Dashboard RCE and Kubernetes API Proxy</title>
       <link>https://blog.flomb.net/posts/tekton/</link>
