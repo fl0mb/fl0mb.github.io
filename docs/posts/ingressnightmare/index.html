@@ -18,7 +18,8 @@ Introduction to Kubernetes Ingress and Admission Controllers In Kubernetes, an I
     
     <meta name="description" content="Wiz recently discovered an unauthenticated remote code execution (RCE) vulnerability in the Ingress NGINX admission controller. I found the exploit chain particularly intriguing and decided to recreate it for a deeper understanding.
 I want to thank my employer CODE WHITE for the permission to publish this post. As part of our Security Intelligence Service, we identified, exploited, and quickly remediated this vulnerability on systems within our clients&rsquo; scope.
-Introduction to Kubernetes Ingress and Admission Controllers In Kubernetes, an Ingress resource is used to manage external access to services within a cluster, typically by routing HTTP/HTTPS traffic based on defined rules." />
+Introduction to Kubernetes Ingress and Admission Controllers
+In Kubernetes, an Ingress resource is used to manage external access to services within a cluster, typically by routing HTTP/HTTPS traffic based on defined rules." />
     <meta name="author" content="" />
     
 
@@ -367,14 +368,14 @@ USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> <span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">ValidationWebhook</span> <span style="color:#f92672">!=</span> <span style="color:#e6db74">&#34;&#34;</span> {
 </span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">validationWebhookServer</span> = <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Server</span>{
 </span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">Addr</span>: <span style="color:#a6e22e">config</span>.<span style="color:#a6e22e">ValidationWebhook</span>,
-</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// G112 (CWE-400): Potential Slowloris Attack
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#a6e22e">ReadHeaderTimeout</span>: <span style="color:#ae81ff">10</span> <span style="color:#f92672">*</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Second</span>,
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// G112 (CWE-400): Potential Slowloris Attack</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">ReadHeaderTimeout</span>: <span style="color:#ae81ff">10</span> <span style="color:#f92672">*</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Second</span>,
 </span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">Handler</span>:           <span style="color:#a6e22e">adm_controller</span>.<span style="color:#a6e22e">NewAdmissionControllerServer</span>(<span style="color:#f92672">&amp;</span><span style="color:#a6e22e">adm_controller</span>.<span style="color:#a6e22e">IngressAdmission</span>{<span style="color:#a6e22e">Checker</span>: <span style="color:#a6e22e">n</span>}),
 </span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">TLSConfig</span>:         <span style="color:#a6e22e">ssl</span>.<span style="color:#a6e22e">NewTLSListener</span>(<span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">ValidationWebhookCertPath</span>, <span style="color:#a6e22e">n</span>.<span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">ValidationWebhookKeyPath</span>).<span style="color:#a6e22e">TLSConfig</span>(),
-</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// disable http/2
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#75715e">// https://github.com/kubernetes/kubernetes/issues/80313
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#75715e">// https://github.com/kubernetes/ingress-nginx/issues/6323#issuecomment-737239159
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>            <span style="color:#a6e22e">TLSNextProto</span>: make(<span style="color:#66d9ef">map</span>[<span style="color:#66d9ef">string</span>]<span style="color:#66d9ef">func</span>(<span style="color:#f92672">*</span><span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Server</span>, <span style="color:#f92672">*</span><span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Conn</span>, <span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Handler</span>)),
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// disable http/2</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// https://github.com/kubernetes/kubernetes/issues/80313</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">// https://github.com/kubernetes/ingress-nginx/issues/6323#issuecomment-737239159</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">TLSNextProto</span>: make(<span style="color:#66d9ef">map</span>[<span style="color:#66d9ef">string</span>]<span style="color:#66d9ef">func</span>(<span style="color:#f92672">*</span><span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Server</span>, <span style="color:#f92672">*</span><span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Conn</span>, <span style="color:#a6e22e">http</span>.<span style="color:#a6e22e">Handler</span>)),
 </span></span><span style="display:flex;"><span>        }
 </span></span><span style="display:flex;"><span>    }
 </span></span></code></pre></div><p>The actual Ingress proxy, that runs inside the same pod as its admission controller, is, however, based on Nginx and thus able to buffer our upload. But it will only be reachable after an actual ingress resource is created. Therefore, let&rsquo;s create and expose an example workload (<a href="https://hub.docker.com/r/hashicorp/http-echo)">https://hub.docker.com/r/hashicorp/http-echo)</a>:</p>
@@ -654,7 +655,7 @@ USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span>        <span style="color:#f92672">error_log</span>  <span style="color:#e6db74">/var/log/nginx/error.log</span> <span style="color:#e6db74">notice</span>;
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>        <span style="color:#f92672">resolver</span> <span style="color:#ae81ff">10</span><span style="color:#e6db74">.96.0.10</span> <span style="color:#e6db74">valid=30s</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">resolver</span> 10.96.0.10 <span style="color:#e6db74">valid=30s</span>;
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span>        <span style="color:#75715e"># See https://www.nginx.com/blog/websocket-nginx
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>        <span style="color:#f92672">map</span> $http_upgrade $connection_upgrade {
@@ -722,7 +723,7 @@ USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e">#
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e">###
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
-</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server</span> <span style="color:#ae81ff">0</span><span style="color:#e6db74">.0.0.1</span>; <span style="color:#75715e"># placeholder
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">server</span> 0.0.0.1; <span style="color:#75715e"># placeholder
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
 </span></span><span style="display:flex;"><span>                <span style="color:#f92672">balancer_by_lua_block</span> {
 </span></span><span style="display:flex;"><span>                        <span style="color:#f92672">balancer.balance()</span>
@@ -890,7 +891,7 @@ USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#75715e"># with an external software (like sysdig)
 </span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>                <span style="color:#f92672">location</span> <span style="color:#e6db74">/nginx_status</span> {
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">allow</span> <span style="color:#ae81ff">127</span><span style="color:#e6db74">.0.0.1</span>;
+</span></span><span style="display:flex;"><span>                        <span style="color:#f92672">allow</span> 127.0.0.1;
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span>                        <span style="color:#f92672">allow</span> ::<span style="color:#ae81ff">1</span>;
 </span></span><span style="display:flex;"><span>
@@ -1303,7 +1304,7 @@ USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span>        <span style="color:#f92672">lua_shared_dict</span> <span style="color:#e6db74">tcp_udp_configuration_data</span> <span style="color:#e6db74">5M</span>;
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>        <span style="color:#f92672">resolver</span> <span style="color:#ae81ff">10</span><span style="color:#e6db74">.96.0.10</span> <span style="color:#e6db74">valid=30s</span>;
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">resolver</span> 10.96.0.10 <span style="color:#e6db74">valid=30s</span>;
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span>        <span style="color:#f92672">init_by_lua_block</span> {
 </span></span><span style="display:flex;"><span>                <span style="color:#f92672">collectgarbage(&#34;collect&#34;)</span>
@@ -1377,6 +1378,9 @@ USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
     <div class="f:fade-30 f:14 mb:8"></div>
 </footer></div>
     </div>
+
+
+    
 </body>
 
 </html>

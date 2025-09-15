@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Playing with HTTP/2 CONNECT">
+  <meta name="twitter:description" content="In HTTP/1, the CONNECT method instructs a proxy to establish a TCP tunnel to a requested target. Once the tunnel is up, the proxy blindly forwards raw traffic in both directions. This mechanism is most commonly used to tunnel TLS traffic through forwarding proxies.
+While digging through the HTTP/2 specification (RFC 9113), I noticed it also features the CONNECT method but with a slight twist. Unlike its predecessor, HTTP/2 CONNECT doesn’t hijack the entire TCP connection, it operates on a single stream. This subtle difference piqued my curiosity.">
+
+    <link rel="alternate" type="application/rss+xml" href="https://blog.flomb.net//index.xml" title="Flomb Blog">
+
+    <title>Playing with HTTP/2 CONNECT - Flomb Blog</title>
+
+    
+    
+    <meta name="description" content="In HTTP/1, the CONNECT method instructs a proxy to establish a TCP tunnel to a requested target. Once the tunnel is up, the proxy blindly forwards raw traffic in both directions. This mechanism is most commonly used to tunnel TLS traffic through forwarding proxies.
+While digging through the HTTP/2 specification (RFC 9113), I noticed it also features the CONNECT method but with a slight twist.  Unlike its predecessor, HTTP/2 CONNECT doesn&rsquo;t hijack the entire TCP connection, it operates on a single stream. This subtle difference piqued my curiosity." />
+    <meta name="author" content="" />
+    
+
+    <link href="/js/normal.css" rel="stylesheet">
+    <script src="/js/style@1.5.0"></script>
+    <script src="/js/themes.js"></script>
+    <script src="/js/styles@1.13.0"></script>
+    <script src="/js/master-styles-group"></script>
+    <script>window.themes = window.themes || new window.Themes()</script>
+
+    <style>
+        :root {
+            --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+        }
+    </style></head>
+<body class="bg:fade-84@dark font:fade-16@dark font:sans">
+    <nav class="w:full h:90 fixed bg:fade-84/.95@dark bg:white z:1000">
+    <div class="
+        h:full
+        w:full
+        max-w:1200
+        mx:auto
+        d:flex
+        align-items:center
+    ">
+        <div>
+            <a href="/" class="mr-3 font:extralight">
+              
+              Flomb Blog
+              
+            </a>
+        </div>
+
+        <div class="ml:auto">
+            
+            
+            
+            
+            <a class="
+                font:semibold
+                font:fade
+                font:fade-10:hover
+                font:fade-30.active
+                px:8
+                transition:150ms;ease-in
+                
+            " href="/about/" title="">About</a>
+            
+        </div>
+    </div>
+</nav>
+<div class="d:flex flex:column@<=sm pt:90 jc:center gap:44 word-break:break-word">
+        <div class="max-w:1200 w:full box:content-box">
+            <style>
+                div.highlight pre {
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    font-size: large;
+                    }
+            </style>
+<article class="box:border-box pt:32">
+    <header class="mb:32">
+        <div class="font:40 font:extrabold">Playing with HTTP/2 CONNECT</div>
+        <div class="mt:16 f:fade-60">
+            <time>Sep 15, 2025</time>
+            </div>
+    </header><div class="
+    _:where(a):hover{text-decoration-color:fade}
+    _:where(a){text-decoration:2;underline;fade-10;_text-decoration-color:fade-70@dark}
+    _:where(blockquote){bl:5;solid;fade-76/.1;_bl:5;solid;fade-34/.1@dark}
+    _:where(code){font:90%;_v:middle}
+    _:where(code:not(.highlight_*,pre_*)){p:2;6;_r:4}
+    _:where(del){text-decoration:1;line-through;fade-68;_text-decoration-color:red-64@dark}
+    _:where(figcaption){text:14;_p:10;20;0;_width:fit;_mx:auto;_font:fade-56;_font:fade-57@dark}
+    _:where(h1){font:40;_font:extrabold}
+    _:where(h1,h2,h3)+:where(h1,h2,h3){mt:.5em}
+    _:where(h1,h2,h3,h4,h5,h6){mt:2em}
+    _:where(h2){mb:1em;_font:32}
+    _:where(h3){font:24}
+    _:where(h4){font:20}
+    _:where(h5){font:16}
+    _:where(h6){font:14}
+    _:where(li)::marker{font:fade-44;_font:fade-68@dark}
+    _:where(li){pl:.375em}
+    _:where(mark){text-decoration:1;underline;#fce016;_bg:transparent;_text-decoration-color:rgb(252;224;22/.5)@dark}
+    _:where(p,li){font:fade-76;_font:16;_line-height:1.65;_font:fade-34@dark}
+    _:where(p,pre,blockquote,figure,ul,ol,table){my:1.125em}
+    >:first-child{mt:0!}
+    _:where(pre){p:20;_r:8;_overflow:auto}
+    _:where(pre,code:not(.highlight_*)){bg:fade-2;_bg:fade-92!@dark}
+    _:where(strong,b,a,code:not(.highlight_*),mark,del){font:fade-92;_font:fade-12@dark}
+    _:where(table){width:full;_border-spacing:0}
+    _:where(td){v:baseline}
+    _:where(td,th):first-child{pl:0}
+    _:where(td,th):last-child{pr:0}
+    _:where(td,th){bb:1;solid;fade-92/.06;_p:6;_b:fade-4/.04@dark}
+    _:where(th){font:fade-78;_font:14;_text:left;_font:fade-12@dark}
+    _:where(th,p_code,li_code,a,mark){font:semibold;_font:medium@dark}
+    _:where(ul){list-style-type:disc}
+    _:where(ul,ol,blockquote){pl:1.5em}
+    _:where(video,img){max-width:full}
+    _:where(a,mark){text-underline-offset:3}
+    _:where(hr){h:2;_bg:fade-10;_bg:fade-70@dark;_my:3em}
+"><p>In HTTP/1, the <a href="https://datatracker.ietf.org/doc/html/rfc9110#name-connect"><code>CONNECT</code></a> method instructs a proxy to establish a TCP tunnel to a requested target. Once the tunnel is up, the proxy blindly forwards raw traffic in both directions. This mechanism is most commonly used to tunnel TLS traffic through forwarding proxies.</p>
+<p>While digging through the HTTP/2 specification (<a href="https://datatracker.ietf.org/doc/html/rfc9113">RFC 9113</a>), I noticed it also features the <code>CONNECT</code> method but with a slight twist.  Unlike its predecessor, HTTP/2 <code>CONNECT</code> doesn&rsquo;t hijack the entire TCP connection, it operates on a single stream. This subtle difference piqued my curiosity.</p>
+<p>A typical HTTP/1 <code>CONNECT</code> request is straightforward:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-http" data-lang="http"><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">CONNECT google.de:443 HTTP/1.1 
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">Host: google.de:443 
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">User-Agent: curl/8.5.0 
+</span></span></span></code></pre></div><p>Once the server responds with <code>HTTP/1.1 200 OK</code>, the tunnel is ready.  In essence, HTTP/1 <code>CONNECT</code> upgrades the entire TCP connection. Raw data is forwarded from that point on, making it seem as if the client is connected directly to the target.</p>
+<p>HTTP/2, by contrast, is a binary protocol where the fundamental protocol unit is the frame. As shown below, every frame carries a stream identifier:</p>
+<pre class="mermaid">
+  ---
+title: &#34;HTTP/2 Frame&#34;
+---
+packet
+0-23:   &#34;Length (24)&#34;
+24-31:  &#34;Type (8)&#34;
+32-39:  &#34;Flags (8)&#34;
+40-40:  &#34;rsvd&#34;
+41-71:  &#34;Stream Identifier (31)&#34;
+</pre>
+
+<p>This stream identifier is used to simulate the HTTP/1 request and response pattern by associating each interaction with a unique stream. Streams allow multiplexing which means a single HTTP/2 connection can host multiple, simultaneous <code>CONNECT</code> tunnels. The raw data for each tunnel is then encapsulated within <code>DATA</code> frames on its respective stream.</p>
+<p>To experiment with this, I decided to build a scanner for misconfigured proxies that allow connections to internal targets, leveraging multiplexing to efficiently scan a range of internal ports over a single TCP connection.</p>
+<h1 id="building-a-scanner-in-go">Building a Scanner in Go</h1>
+<p>Go is currently my language of choice, and its standard library includes HTTP/2 support. While the high-level <code>net/http</code> client doesn&rsquo;t directly expose the <code>CONNECT</code> method for HTTP/2, the necessary building blocks are available in the <code>golang.org/x/net/http2</code> package.</p>
+<p>First, we establish a raw TCP or TLS connection to the proxy. For TLS, we must negotiate HTTP/2 using ALPN by setting <code>NextProtos</code> to <code>h2</code>.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Note: All code snippets omit error handling for brevity.</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">conn</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Dial</span>(<span style="color:#e6db74">&#34;tcp&#34;</span>, <span style="color:#a6e22e">url</span>.<span style="color:#a6e22e">Host</span>, <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Config</span>{
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">InsecureSkipVerify</span>: <span style="color:#66d9ef">true</span>, 
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">NextProtos</span>:         []<span style="color:#66d9ef">string</span>{<span style="color:#e6db74">&#34;h2&#34;</span>},
+</span></span><span style="display:flex;"><span>})
+</span></span></code></pre></div><p>To initiate the HTTP/2 connection, the client must send the <a href="https://datatracker.ietf.org/doc/html/rfc9113#section-3.4">connection preface</a> (<code>PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n</code>) followed by a, potentially empty, <code>SETTINGS</code> frame. The server replies with its own <code>SETTINGS</code> frame. Once both sides have acknowledged each other&rsquo;s settings, the connection is ready.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#a6e22e">conn</span>.<span style="color:#a6e22e">Write</span>([]byte(<span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">ClientPreface</span>))
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">framer</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">NewFramer</span>(<span style="color:#a6e22e">conn</span>, <span style="color:#a6e22e">conn</span>)
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">framer</span>.<span style="color:#a6e22e">WriteSettings</span>(<span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">Setting</span>{})
+</span></span></code></pre></div><p>The <code>http2.Framer</code> handles the low-level work of parsing and serializing frames. Our main logic can be built around a loop that reads and processes incoming frames:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">for</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">f</span>,<span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">framer</span>.<span style="color:#a6e22e">ReadFrame</span>()
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">switch</span> <span style="color:#a6e22e">f</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">f</span>.(<span style="color:#66d9ef">type</span>) {
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">DataFrame</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#75715e">// Handle incoming data for a tunnel</span>
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">MetaHeadersFrame</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#75715e">// Handle response headers for a CONNECT request			</span>
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">GoAwayFrame</span>:
+</span></span><span style="display:flex;"><span>	       <span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Println</span>(<span style="color:#e6db74">&#34;Received GoAway frame&#34;</span>)
+</span></span><span style="display:flex;"><span>	        <span style="color:#66d9ef">return</span> <span style="color:#75715e">// Connection is closing</span>
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">SettingsFrame</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Received SETTINGS frame, ACK: %t\n&#34;</span>, <span style="color:#a6e22e">f</span>.<span style="color:#a6e22e">IsAck</span>())
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">RSTStreamFrame</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Received RST_STREAM frame for stream %d. Error: %s&#34;</span>, <span style="color:#a6e22e">f</span>.<span style="color:#a6e22e">StreamID</span>, <span style="color:#a6e22e">f</span>.<span style="color:#a6e22e">ErrCode</span>)
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">PingFrame</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Received frame: %v\n&#34;</span>, <span style="color:#a6e22e">f</span>.<span style="color:#a6e22e">FrameHeader</span>.<span style="color:#a6e22e">Type</span>)	
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">case</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">WindowUpdateFrame</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Received frame: %v\n&#34;</span>, <span style="color:#a6e22e">f</span>.<span style="color:#a6e22e">FrameHeader</span>.<span style="color:#a6e22e">Type</span>)					
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">default</span>:
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Transport: unhandled response frame type %T&#34;</span>, <span style="color:#a6e22e">f</span>)
+</span></span><span style="display:flex;"><span>		}
+</span></span></code></pre></div><p>To create a tunnel, we send a <code>HEADERS</code> frame with the <code>CONNECT</code> method and set the <code>:authority</code> pseudo-header to our desired destination. Unlike HTTP/1&rsquo;s plaintext headers, HTTP/2 headers must be HPACK-encoded. This compression scheme saves bandwidth while also resisting compression oracle attacks like CRIME. HPACK uses a combination of a static table for common headers, a dynamic table that indexes repeated headers within the connection, and a static Huffman code for any remaining string literals. The initial static table and Huffman code are defined in the <a href="https://datatracker.ietf.org/doc/html/rfc7541#autoid-42">specification</a>.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">var</span> <span style="color:#a6e22e">hpackBuf</span> <span style="color:#a6e22e">bytes</span>.<span style="color:#a6e22e">Buffer</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">hpackEncoder</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">hpack</span>.<span style="color:#a6e22e">NewEncoder</span>(<span style="color:#f92672">&amp;</span><span style="color:#a6e22e">hpackBuf</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Client-initiated streams MUST use odd-numbered stream identifiers.</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">streamID</span> <span style="color:#f92672">:=</span> uint32(<span style="color:#ae81ff">1</span>) 
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">targetAddress</span> <span style="color:#f92672">:=</span> <span style="color:#e6db74">&#34;192.168.1.1:8080&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">connectHeaders</span> <span style="color:#f92672">:=</span> []<span style="color:#a6e22e">hpack</span>.<span style="color:#a6e22e">HeaderField</span>{
+</span></span><span style="display:flex;"><span>    {<span style="color:#a6e22e">Name</span>: <span style="color:#e6db74">&#34;:method&#34;</span>, <span style="color:#a6e22e">Value</span>: <span style="color:#e6db74">&#34;CONNECT&#34;</span>},
+</span></span><span style="display:flex;"><span>    {<span style="color:#a6e22e">Name</span>: <span style="color:#e6db74">&#34;:authority&#34;</span>, <span style="color:#a6e22e">Value</span>: <span style="color:#a6e22e">targetAddress</span>},
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">for</span> <span style="color:#a6e22e">_</span>, <span style="color:#a6e22e">hf</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">connectHeaders</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">_</span> = <span style="color:#a6e22e">hpackEncoder</span>.<span style="color:#a6e22e">WriteField</span>(<span style="color:#a6e22e">hf</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">framer</span>.<span style="color:#a6e22e">WriteHeaders</span>(<span style="color:#a6e22e">http2</span>.<span style="color:#a6e22e">HeadersFrameParam</span>{
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">StreamID</span>:      <span style="color:#a6e22e">streamID</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">EndHeaders</span>:    <span style="color:#66d9ef">true</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">EndStream</span>:     <span style="color:#66d9ef">false</span>, <span style="color:#75715e">// Keep the stream open for data</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">BlockFragment</span>: <span style="color:#a6e22e">hpackBuf</span>.<span style="color:#a6e22e">Bytes</span>(),
+</span></span><span style="display:flex;"><span>})
+</span></span></code></pre></div><p>If the proxy successfully establishes the tunnel, it will respond with a <code>HEADERS</code> frame containing a <code>:status 200</code>. From that point on, any <code>DATA</code> frames we send on that stream ID will be forwarded to the target, and any data from the target will be sent back to us in <code>DATA</code> frames on the same stream.</p>
+<p>To make this stream usable in Go, we can wrap it in an object that satisfies the standard <a href="https://cs.opensource.google/go/go/+/refs/tags/go1.25.1:src/net/net.go;l=124"><code>net.Conn</code></a> interface. This allows us to treat our proxied tunnel just like any other network connection, such as one created with <code>net.Dial()</code>. The interface is defined as follows:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">Conn</span> <span style="color:#66d9ef">interface</span> {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Read</span>(<span style="color:#a6e22e">b</span> []<span style="color:#66d9ef">byte</span>) (<span style="color:#a6e22e">n</span> <span style="color:#66d9ef">int</span>, <span style="color:#a6e22e">err</span> <span style="color:#66d9ef">error</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Write</span>(<span style="color:#a6e22e">b</span> []<span style="color:#66d9ef">byte</span>) (<span style="color:#a6e22e">n</span> <span style="color:#66d9ef">int</span>, <span style="color:#a6e22e">err</span> <span style="color:#66d9ef">error</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Close</span>() <span style="color:#66d9ef">error</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">LocalAddr</span>() <span style="color:#a6e22e">Addr</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">RemoteAddr</span>() <span style="color:#a6e22e">Addr</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">SetDeadline</span>(<span style="color:#a6e22e">t</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Time</span>) <span style="color:#66d9ef">error</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">SetReadDeadline</span>(<span style="color:#a6e22e">t</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Time</span>) <span style="color:#66d9ef">error</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">SetWriteDeadline</span>(<span style="color:#a6e22e">t</span> <span style="color:#a6e22e">time</span>.<span style="color:#a6e22e">Time</span>) <span style="color:#66d9ef">error</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>An example implementation for the <code>Read</code> and <code>Write</code> methods might look like this:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">tunnelConn</span> <span style="color:#66d9ef">struct</span> {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">proxyConn</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">proxyConn</span> 
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">streamID</span>  <span style="color:#66d9ef">uint32</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">rxChan</span>    <span style="color:#66d9ef">chan</span> []<span style="color:#66d9ef">byte</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">rxBuff</span>    <span style="color:#a6e22e">bytes</span>.<span style="color:#a6e22e">Buffer</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">func</span> (<span style="color:#a6e22e">t</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">tunnelConn</span>) <span style="color:#a6e22e">Write</span>(<span style="color:#a6e22e">b</span> []<span style="color:#66d9ef">byte</span>) (<span style="color:#a6e22e">n</span> <span style="color:#66d9ef">int</span>, <span style="color:#a6e22e">err</span> <span style="color:#66d9ef">error</span>) {
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">err</span> = <span style="color:#a6e22e">t</span>.<span style="color:#a6e22e">proxyConn</span>.<span style="color:#a6e22e">framer</span>.<span style="color:#a6e22e">WriteData</span>(<span style="color:#a6e22e">t</span>.<span style="color:#a6e22e">streamID</span>, <span style="color:#66d9ef">false</span>, <span style="color:#a6e22e">b</span>)
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">return</span>  len(<span style="color:#a6e22e">b</span>), <span style="color:#a6e22e">err</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">func</span> (<span style="color:#a6e22e">t</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">tunnelConn</span>) <span style="color:#a6e22e">Read</span>(<span style="color:#a6e22e">b</span> []<span style="color:#66d9ef">byte</span>) (<span style="color:#a6e22e">n</span> <span style="color:#66d9ef">int</span>, <span style="color:#a6e22e">err</span> <span style="color:#66d9ef">error</span>) {
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> <span style="color:#a6e22e">t</span>.<span style="color:#a6e22e">rxBuff</span>.<span style="color:#a6e22e">Len</span>() <span style="color:#f92672">==</span> <span style="color:#ae81ff">0</span> {
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">data</span>, <span style="color:#a6e22e">ok</span> <span style="color:#f92672">:=</span> <span style="color:#f92672">&lt;-</span><span style="color:#a6e22e">t</span>.<span style="color:#a6e22e">rxChan</span>
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">if</span> !<span style="color:#a6e22e">ok</span> {
+</span></span><span style="display:flex;"><span>			<span style="color:#66d9ef">return</span> <span style="color:#ae81ff">0</span>, <span style="color:#a6e22e">io</span>.<span style="color:#a6e22e">EOF</span>
+</span></span><span style="display:flex;"><span>		}
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">t</span>.<span style="color:#a6e22e">rxBuff</span>.<span style="color:#a6e22e">Write</span>(<span style="color:#a6e22e">data</span>)
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">return</span> <span style="color:#a6e22e">t</span>.<span style="color:#a6e22e">rxBuff</span>.<span style="color:#a6e22e">Read</span>(<span style="color:#a6e22e">b</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>With this <code>net.Conn</code> implementation, we can easily layer other protocols on top. For instance, we could perform a TLS handshake and send an HTTP/1 request through the tunnel:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#a6e22e">tunnel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">proxyConn</span>.<span style="color:#a6e22e">getTunnelConn</span>(<span style="color:#a6e22e">ports</span>, <span style="color:#a6e22e">resultChan</span>, <span style="color:#e6db74">&#34;example.com&#34;</span>, <span style="color:#a6e22e">rxChan</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">tlsClient</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Client</span>(<span style="color:#a6e22e">tunnel</span>, <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">tls</span>.<span style="color:#a6e22e">Config</span>{
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">ServerName</span>:         <span style="color:#e6db74">&#34;example.com&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">InsecureSkipVerify</span>: <span style="color:#66d9ef">true</span>,
+</span></span><span style="display:flex;"><span>})
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">fmt</span>.<span style="color:#a6e22e">Fprintf</span>(<span style="color:#a6e22e">tlsClient</span>, <span style="color:#e6db74">&#34;GET / HTTP/1.1\r\nHost: %s\r\n\r\n&#34;</span>, <span style="color:#e6db74">&#34;example.com&#34;</span>)
+</span></span></code></pre></div><p>Here is an example of the tool connecting to <code>example.com</code> through an HTTP/2 proxy:</p>
+<pre tabindex="0"><code>└─$ ./http2ConnTun -u example.com -p 443 -c -k
+2025/09/10 07:02:20 INFO Connected to proxy
+HTTP/1.1 200 OK
+Content-Type: text/html
+ETag: &#34;84238dfc8092e5d9c0dac8ef93371a07:1736799080.121134&#34;
+Last-Modified: Mon, 13 Jan 2025 20:11:20 GMT
+Cache-Control: max-age=86000
+Date: Wed, 10 Sep 2025 05:02:21 GMT
+Content-Length: 1256
+Connection: keep-alive
+Alt-Svc: h3=&#34;:443&#34;; ma=93600
+
+&lt;!doctype html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    &lt;title&gt;Example Domain&lt;/title&gt;
+
+    &lt;meta charset=&#34;utf-8&#34; /&gt;
+    &lt;meta http-equiv=&#34;Content-type&#34; content=&#34;text/html; charset=utf-8&#34; /&gt;
+    &lt;meta name=&#34;viewport&#34; content=&#34;width=device-width, initial-scale=1&#34; /&gt;
+    &lt;style type=&#34;text/css&#34;&gt;
+    body {
+...
+</code></pre><p>The following Wireshark screenshot illustrates the full process, using a plaintext HTTP/1 request inside the tunnel for clarity:
+<img src="wireshark1.png" alt=""></p>
+<ol>
+<li>The flow begins with the client preface, which Wireshark labels <code>Magic</code>.</li>
+<li>We see the initial <code>SETTINGS</code> frames from the client and server, followed by <code>SETTINGS</code> frames with the <code>ACK</code> flag set, confirming receipt.</li>
+<li>The client sends a <code>HEADERS</code> frame with the <code>CONNECT</code> method, and the server replies with a <code>HEADERS</code> frame indicating the result.</li>
+<li>Finally, two <code>DATA</code> frames contain the plaintext HTTP/1 request and response sent through the established tunnel.</li>
+</ol>
+<p>The full source code is available at <a href="https://github.com/fl0mb/HTTP2-CONNECT-Tunnel">https://github.com/fl0mb/HTTP2-CONNECT-Tunnel</a>.</p>
+<h1 id="application-efficient-port-scanning">Application: Efficient Port Scanning</h1>
+<p>With the underlying mechanics in place, building a port scanner is straightforward. Send out <code>CONNECT</code> requests for various <code>ip:port</code> combinations, each on a new stream ID. We don&rsquo;t even need to send <code>DATA</code> frames; we only need to monitor the response headers to determine if a port is open.</p>
+<ul>
+<li>
+<p>A successful connection yields a <code>HEADERS</code> frame with a <code>:status 200</code>.</p>
+</li>
+<li>
+<p>As observed with Envoy and Apache httpd, a failed connection will typically result in:</p>
+<ul>
+<li>A <code>HEADERS</code> frame with a <code>:status 503</code>.</li>
+<li>A <code>DATA</code> frame from the proxy itself containing an error message.</li>
+<li>A <code>RST_STREAM</code> frame with an error like <code>CONNECT_ERROR</code>(Envoy) or <code>NO_ERROR</code> (Apache). This is the most reliable indicator of failure.</li>
+</ul>
+</li>
+</ul>
+<p><img src="wireshark2.png" alt=""></p>
+<p>By tracking the responses for each stream ID, we can map out open ports on an internal network, all multiplexed over a single HTTP/2 connection. This technique may also bypass network security monitoring that isn&rsquo;t equipped to inspect multiplexed HTTP/2 traffic.</p>
+<h1 id="setting-up-a-test-environment">Setting Up a Test Environment</h1>
+<p>Support for HTTP/2 <code>CONNECT</code> tunneling is not  yet widespread. I found reliable implementations in Envoy and Apache httpd.</p>
+<p>To run a test instance of Envoy, use the following Docker command:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>docker run --rm -v ./envoy.yaml:/envoy.yaml:ro envoyproxy/envoy:distroless-v1.35-latest -c /envoy.yaml
+</span></span></code></pre></div><p><code>envoy.yaml</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">static_resources</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">listeners</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">listener_0</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">address</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">socket_address</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">protocol</span>: <span style="color:#ae81ff">TCP</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">address</span>: <span style="color:#ae81ff">0.0.0.0</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">port_value</span>: <span style="color:#ae81ff">10001</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">filter_chains</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">filters</span>:
+</span></span><span style="display:flex;"><span>      - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">envoy.filters.network.http_connection_manager</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">typed_config</span>:
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">&#34;@type&#34;: </span><span style="color:#ae81ff">type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">stat_prefix</span>: <span style="color:#ae81ff">ingress_http</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">codec_type</span>: <span style="color:#ae81ff">HTTP2</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">route_config</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">name</span>: <span style="color:#ae81ff">local_route</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">virtual_hosts</span>:
+</span></span><span style="display:flex;"><span>            - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">local_service</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">domains</span>:
+</span></span><span style="display:flex;"><span>              - <span style="color:#e6db74">&#34;*&#34;</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">routes</span>:
+</span></span><span style="display:flex;"><span>              - <span style="color:#f92672">match</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">connect_matcher</span>:
+</span></span><span style="display:flex;"><span>                    {}
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">route</span>:
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">cluster</span>: <span style="color:#ae81ff">dynamic_forward_proxy_cluster</span>
+</span></span><span style="display:flex;"><span>                  <span style="color:#f92672">upgrade_configs</span>:
+</span></span><span style="display:flex;"><span>                  - <span style="color:#f92672">upgrade_type</span>: <span style="color:#ae81ff">CONNECT</span>
+</span></span><span style="display:flex;"><span>                    <span style="color:#f92672">connect_config</span>:
+</span></span><span style="display:flex;"><span>                      {}
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">http_filters</span>:
+</span></span><span style="display:flex;"><span>          - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">envoy.filters.http.dynamic_forward_proxy</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">typed_config</span>:
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">&#39;@type&#39;</span>: <span style="color:#ae81ff">type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">dns_cache_config</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">name</span>: <span style="color:#ae81ff">dynamic_forward_proxy_cache_config</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">dns_lookup_family</span>: <span style="color:#ae81ff">V4_ONLY                      </span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">http_filters</span>:
+</span></span><span style="display:flex;"><span>          - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">envoy.filters.http.router</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">typed_config</span>:
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">&#34;@type&#34;: </span><span style="color:#ae81ff">type.googleapis.com/envoy.extensions.filters.http.router.v3.Router</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">http2_protocol_options</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">allow_connect</span>: <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">clusters</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">dynamic_forward_proxy_cluster</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">lb_policy</span>: <span style="color:#ae81ff">CLUSTER_PROVIDED</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">cluster_type</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">name</span>: <span style="color:#ae81ff">envoy.clusters.dynamic_forward_proxy</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">typed_config</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">&#39;@type&#39;</span>: <span style="color:#ae81ff">type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">dns_cache_config</span>:
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">name</span>: <span style="color:#ae81ff">dynamic_forward_proxy_cache_config</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">dns_lookup_family</span>: <span style="color:#ae81ff">V4_ONLY</span>
+</span></span></code></pre></div><p>To run a test instance of Apache httpd:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>docker run --rm -p 8080:8080 -v ./httpd.conf:/usr/local/apache2/conf/httpd.conf httpd:2.4.65
+</span></span></code></pre></div><p><code>httpd.conf</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-apache" data-lang="apache"><span style="display:flex;"><span>ServerRoot <span style="color:#e6db74">&#34;/usr/local/apache2&#34;</span>
+</span></span><span style="display:flex;"><span>Listen <span style="color:#ae81ff">8080</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>LoadModule mpm_event_module modules/mod_mpm_event.so
+</span></span><span style="display:flex;"><span>LoadModule http2_module modules/mod_http2.so
+</span></span><span style="display:flex;"><span>LoadModule proxy_module modules/mod_proxy.so
+</span></span><span style="display:flex;"><span>LoadModule proxy_connect_module modules/mod_proxy_connect.so
+</span></span><span style="display:flex;"><span>LoadModule proxy_http_module modules/mod_proxy_http.so
+</span></span><span style="display:flex;"><span>LoadModule authz_core_module modules/mod_authz_core.so
+</span></span><span style="display:flex;"><span>LoadModule log_config_module modules/mod_log_config.so
+</span></span><span style="display:flex;"><span>LoadModule unixd_module modules/mod_unixd.so
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&lt;IfModule</span> <span style="color:#e6db74">unixd_module</span><span style="color:#f92672">&gt;</span> 
+</span></span><span style="display:flex;"><span>User daemon
+</span></span><span style="display:flex;"><span>Group daemon
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&lt;/IfModule&gt;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>ErrorLog <span style="color:#e6db74">/dev/stderr</span>
+</span></span><span style="display:flex;"><span>TransferLog <span style="color:#e6db74">/dev/stdout</span>
+</span></span><span style="display:flex;"><span>ServerName localhost
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&lt;VirtualHost</span> <span style="color:#e6db74">*:8080</span><span style="color:#f92672">&gt;</span>
+</span></span><span style="display:flex;"><span>    ProxyRequests <span style="color:#66d9ef">on</span>
+</span></span><span style="display:flex;"><span>    Protocols h2c
+</span></span><span style="display:flex;"><span>    AllowCONNECT <span style="color:#ae81ff">443</span> <span style="color:#ae81ff">80</span> <span style="color:#ae81ff">8888</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">&lt;/VirtualHost&gt;</span>
+</span></span></code></pre></div><h1 id="conclusion">Conclusion</h1>
+<p>HTTP/2&rsquo;s <code>CONNECT</code> method transforms a single connection into a conduit for multiple, independent tunnels. This offers a highly efficient way to multiplex connections, enabling applications like the port scanner demonstrated here. Because this traffic is encapsulated within a standard HTTP/2 stream, it may also bypass traditional network inspection tools.</p>
+<p>While this post focused on TCP tunneling for port scanning, the <code>CONNECT</code> mechanism is being extended to support other protocols, opening up further possibilities.</p>
+<ul>
+<li>WebSockets: <a href="https://datatracker.ietf.org/doc/html/rfc8441">RFC 8441</a> (Extended CONNECT) upgrades a stream to a WebSocket connection, bypassing the HTTP/1 <code>Connection: Upgrade</code> header, which is forbidden in HTTP/2. Example:</li>
+</ul>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-http" data-lang="http"><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">:method: CONNECT
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">:authority: 172.17.0.1:8888
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">:protocol: websocket
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">:scheme: http
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">:path: /ws
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">sec-websocket-version: 13
+</span></span></span></code></pre></div><ul>
+<li>UDP: <a href="https://datatracker.ietf.org/doc/html/rfc9298">RFC 9298</a> defines a method for proxying UDP datagrams.</li>
+<li>IP: <a href="https://datatracker.ietf.org/doc/html/rfc9484">RFC 9484</a> specifies a way to proxy raw IP packets.</li>
+</ul>
+<p>HTTP/2 does not appear to be widely known in the security community and I am looking forward to more interesting and creative applications.</p>
+<p>For a more thorough introduction of HTTP/2, I recommend the series of blog posts on <a href="https://galbarnahum.com/">https://galbarnahum.com/</a>.</p>
+</div></article>
+<footer class="py:24">
+    <div class="f:fade-30 f:14 mb:8"></div>
+</footer></div>
+    </div>
+
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true });
+  </script>
+
+    
+</body>
+
+</html>

